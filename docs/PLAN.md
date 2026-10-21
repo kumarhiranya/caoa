@@ -1,11 +1,11 @@
 # CAOA rework plan
 
 Clean re-implementation of *CAOA: Completion-Assisted Object-CAD Alignment*
-(arXiv 2606.18429) in `caoa-repro`, using the legacy repo
+(arXiv 2606.18429) in this repo (`caoa`; `caoa-repro` until 2026-10-21), using the legacy repo
 (`~/research/Github/vr_reconstruction`) only as a reference.
 
 Living document: update the status column and the phase sections as work lands.
-Last updated: 2026-10-20 (revised after the legacy-evaluation review; Table 1 grouping decided; paper mismatches recorded).
+Last updated: 2026-10-21. The project moved to the DGX (the workstation GPU is shared). Data comes from the transfer bundle (`scripts/make_transfer_bundle.py`; see `CLAUDE.md`). The repo is https://github.com/kumarhiranya/caoa.
 
 ## Ground rules
 
@@ -49,11 +49,11 @@ Last updated: 2026-10-20 (revised after the legacy-evaluation review; Table 1 gr
 | P2 | Evaluation core: legacy per-object metric, official Scan2CAD benchmark | **Done** | Exact parity with legacy and upstream scripts |
 | P3 | OCAM object-only (legacy `mnkpv3`) on spconv: pilot | **Done** | Superseded by the P3b re-run |
 | P3b | Legacy evaluation parity: legacy sample set, legacy reports, Table 1 grouping | **Done** ([results](results/P3b.md)) | Exact 1,864 test set; parity tests; pilot 73.0% vs server 71.2–71.8% |
-| P4 | Data completion: CAD samplers, scene context; full ScanNet (val done, train gated) | **Code done** (caches not built) | CAD↔scan sanity; context parity (both variants) |
-| P5 | Completion datasets: S2C-Completion (completion view), SN-Indoor | **Code done**; cache build awaits approval | Parity with recovered legacy loaders |
+| P4 | Data completion: CAD samplers, scene context; full ScanNet | **Code done; data local, caches built** (2026-10-21; `scene0212_00` unavailable) | CAD↔scan sanity; context parity (both variants) |
+| P5 | Completion datasets: S2C-Completion (completion view), SN-Indoor | **Code done; caches built** (r = 0: 2.0 GB, r = 1 m: 2.8 GB; train 6,220 / val 1,744) | Parity with recovered legacy loaders |
 | P6 | CAPCM model: ODGNet port + legacy completion evaluation | **Done** ([results](results/P6.md)) | Op/metric parity; re-scored `ODG_*_S2CC.csv` |
-| P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), after P8 | Planned | Training curve vs the legacy log; best ckpt test CDL1 vs 46.80 |
-| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **In progress** | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
+| P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), **on the DGX** | Ready (runbook in `CLAUDE.md`) | Val curve vs `results/legacy_curves/s2ccompletion_upTransb1_val.csv`; ckpt-best test CDL1 vs 46.80 |
+| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Ready**: code, configs and completion caches; to run on the DGX | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | Planned | 95.8% accuracy; legacy embeddings reproduced |
 | P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | Planned | Ablation deltas under legacy + official evaluation |
 | P11 | Predicted instances: legacy SoftGroup evaluation, then the official pipeline | Planned | `sg_mnk_comp.csv`, `perclass_results.csv` |
@@ -343,6 +343,8 @@ Code written and tested (not yet run at scale):
 - Recipe (paper): AdamW 5e-4; LambdaLR step 20, γ 0.8, min 5e-6; CD-L1 + orthogonality; 200 epochs; batch 32. ~1.5 days per run on full data.
 - **Scope (user, 2026-10-21): retrain S2C-C only**, to check that our training loop reproduces legacy (`s2ccompletion_upTransb1`: best epoch 180, test CDL1 46.80). The other rows are covered by the re-scored legacy checkpoints (P6). Runs after P8.
 - Measured cost (after the Chamfer / k-NN / cudnn.benchmark speed-ups): 0.89 s per batch-32 step, about 19 GPU-hours for 401 epochs. For reference: concat about 38 h, SN-Indoor about 370 h (~15 days); legacy logged 0.83 s per step.
+- **Runs on the user's DGX** (2026-10-21). Runbook, data to copy (r = 0 completion cache, 2.0 GB, and `semantic_embeddings.npy`, 46 MB; now a `paths.yaml` entry) and targets are in `CLAUDE.md`. The legacy validation curve (39 points, epochs 10–390) is in `results/legacy_curves/s2ccompletion_upTransb1_val.csv`.
+- Batch 32 needs about 40 GB of GPU memory (legacy logged 39.99 GB). `train_completion.py` has no resume yet.
 - (Originally planned runs: S2C-C; SN-Indoor; SN-Indoor + S2C-C; + context 100 cm.)
 - Legacy selection (best on test) and legacy averaging first.
 - The paper's "+Ctxt_100" row is the best *validation* score of an **S2C-C-only** run with context. Reproduce what was run first; the paper's description second.
@@ -372,6 +374,7 @@ Validation gate:
   | `legacy_comp_concat_inst_emb1024` | concat | inst+comp | 1024 | 15k | Table 1 |
 
   All other settings equal `legacy_nocomp` (server configs compared key by key; `add_embedding_as_feat` is False or the default False in every run).
+- First started 2026-10-21 15:33 on the workstation in two lanes, then **stopped at ~5% (user) to move to the DGX**. They are GPU-bound: the completed points fill many more sparse voxels than the partial scans, so each run trains at 0.6–0.7 it/s with two sharing the GPU, against ~4 it/s for `legacy_nocomp`. The total is about 28 GPU-hours. The legacy componly run took about 7 h for 25k steps (from its event files).
 - Completion inputs exactly as legacy: GT-instance path in the **GT box frame** (`custom_datasets_pose.py:5000`, `:5024`, `:5063`).
 - Completion inference timing (E10).
 - Inst+completion and completion-only inputs; class rule `relpose_cache`.
@@ -559,7 +562,8 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | Pair cache v2 (v1 deleted) | 552 MB | done (1,505 scenes) |
 | CAD point cache | 0.3–0.6 GB | P4a, to approve |
 | Context (if stored) | est. 1–3 GB | P4b, to approve |
-| Completed-points caches | ~0.8 GB per model (8,527 pairs × 8,192 float32 points) | P8 |
+| Completed-points caches | ~0.8 GB per model (8,527 pairs × 8,192 float32 points) | P8, done |
+| DGX transfer bundle (`/home/data/caoa_dgx_bundle`) | symlinks + 0.5 GB copied from the drive; sends 7.8 GB (`now/`) + 29.6 GB (`later/`) | done |
 | SN-Indoor local cache (optional) | unknown, measure first | P5c, to approve |
 | ScanNet val scenes (P4d-val) | ~3 GB | done |
 | ScanNet train scenes (P4d-train) | 9.2 GiB | done (scene0212_00 unavailable) |

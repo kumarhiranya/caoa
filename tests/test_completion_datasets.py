@@ -13,8 +13,8 @@ from caoa.data.pairs import load_pairs
 from caoa.paths import load_paths
 
 PATHS = load_paths()
-SEM_EMB = PATHS.legacy_repo / "data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy"
-needs_drive = pytest.mark.skipif(not (PATHS.shapenet / "aug_train_test_splits.pkl").exists(), reason="ShapeNet drive not mounted")
+SEM_EMB = PATHS.semantic_embeddings
+needs_snindoor = pytest.mark.skipif(not (PATHS.shapenet.parent / "ShapeNetV2-augmented").exists(), reason="SN-Indoor partials not available")
 
 
 def legacy_crop():
@@ -39,7 +39,7 @@ def test_snindoor_crop_matches_legacy(difficulty):
         np.testing.assert_array_equal(ours, ref)
 
 
-@needs_drive
+@needs_snindoor
 @pytest.mark.data
 def test_snindoor_items():
     sem = np.load(SEM_EMB, allow_pickle=True).item()
@@ -49,11 +49,12 @@ def test_snindoor_items():
     assert np.abs(partial.mean(0)).max() < 1e-4 and np.isclose(np.linalg.norm(partial, axis=1).max(), 1.0, atol=1e-5)
 
 
-@needs_drive
 @pytest.mark.data
 def test_s2c_completion_frames():
     """The instance must lie on its CAD in both legacy frames (train: CAD frame; val: normalised world frame)."""
     pairs = [p for p in load_pairs(PATHS.cache, "val", class_rule="relpose_cache") if keep_for_completion(p.sem_name)][:4]
+    if not all((PATHS.shapenet / p.catid_cad / p.id_cad).exists() for p in pairs):
+        pytest.skip("CAD meshes not available")
     np.random.seed(0)
     samples = [
         CompletionSample(p.scene_id, p.model_index, p.catid_cad, p.id_cad, p.sem_name, p.points.astype(float), np.zeros((0, 3)),

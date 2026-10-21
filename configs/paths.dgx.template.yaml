@@ -1,0 +1,15 @@
+# Data locations for a machine that received the transfer bundle (scripts/make_transfer_bundle.py).
+# Everything lives under one <DATA_ROOT>. Create the local config with:
+#   sed "s|<DATA_ROOT>|/abs/path/to/caoa_data|" configs/paths.dgx.template.yaml > configs/paths.local.yaml
+# `legacy/` is a trimmed copy of the legacy repo with its relative layout (code, configs, logs,
+# 3 ODGNet checkpoints, annotations, SEM files, target tables).
+
+scannet_scans: <DATA_ROOT>/scannet/scans                     # "later" tier: 4 files per scene
+shapenet: <DATA_ROOT>/shapenet/ShapeNetV2                    # split files now; the 3,049 Scan2CAD CADs in "later"
+s2c_annotations: <DATA_ROOT>/legacy/scan2cad_annotator/scan2cad_v2_completion_annotations.json
+scan2cad_full_annotations: <DATA_ROOT>/legacy/Scan2CAD/dataset/full_annotations.json
+scan2cad_cad_appearances: <DATA_ROOT>/legacy/Scan2CAD/dataset/cad_appearances.json
+legacy_repo: <DATA_ROOT>/legacy
+semantic_embeddings: <DATA_ROOT>/legacy/data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy
+legacy_results: <DATA_ROOT>/legacy/results
+cache: <DATA_ROOT>/caoa_cache

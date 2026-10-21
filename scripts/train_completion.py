@@ -96,7 +96,7 @@ def main():
     device = torch.device("cuda")
     torch.backends.cudnn.benchmark = True  # as legacy (ODGNet main.py:18, train_pose.py)
     paths = load_paths()
-    sem = np.load(paths.legacy_repo / "data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy", allow_pickle=True).item()
+    sem = np.load(paths.semantic_embeddings, allow_pickle=True).item()
 
     model = UpTrans.from_config(cfg["model"]).to(device)
     test_set = build_dataset(cfg["dataset"]["test"], paths, sem)

@@ -47,7 +47,7 @@ def main():
     stored = load_legacy_checkpoint(model, run / "ckpt-best.pth")
     print(f"checkpoint epoch {stored['epoch']}, stored validate() metrics {stored['metrics']}")
 
-    sem = np.load(paths.legacy_repo / "data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy", allow_pickle=True).item()
+    sem = np.load(paths.semantic_embeddings, allow_pickle=True).item()
     samples = load_completion_samples(paths.cache, 1.0, "val")
     print(f"val samples with 1 m context: {len(samples)} (with any context points: {sum(len(s.context_points) > 0 for s in samples)})")
 

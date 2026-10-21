@@ -19,5 +19,13 @@ scan2cad_cad_appearances: /home/hiranya/research/Github/vr_reconstruction/Scan2C
 # The legacy codebase (read-only reference; used by parity tests)
 legacy_repo: /home/hiranya/research/Github/vr_reconstruction
 
+# Legacy SEM (PTv3 classifier) CAD embeddings, {catid_idcad: (512,)}; the completion datasets
+# return them as `sem_emb` (zeros for CADs missing from the file, fix 3). 46 MB.
+semantic_embeddings: /home/hiranya/research/Github/vr_reconstruction/data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy
+
+# Legacy target tables (the server's results/ folder: comp.csv, compinst.csv, sg_mnk_comp.csv,
+# perclass_results.csv, ODG_*_S2CC.csv, ...). 49 KB.
+legacy_results: /media/hiranya/KHG Elements/mmlab-server-data/data/hiranya/Github/vr_reconstruction/results
+
 # Derived data written by this codebase
 cache: cache

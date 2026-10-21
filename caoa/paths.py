@@ -18,6 +18,8 @@ class Paths:
     scan2cad_full_annotations: Path
     scan2cad_cad_appearances: Path
     legacy_repo: Path
+    semantic_embeddings: Path
+    legacy_results: Path
     cache: Path
 
 

@@ -4,7 +4,7 @@
 
 Each run is the checkpoint + model config a legacy `test_S2CC_benchmark` run used
 (Mar 5 2025). Targets: the logged `[TEST] Metrics` line (legacy `test()` aggregation)
-and the per-category table in `results/ODG_*_S2CC.csv` (server copy). The test set is
+and the per-category table in `<legacy_results>/ODG_*_S2CC.csv` (server copy; `paths.yaml`). The test set is
 the S2C-C val split without context (`legacy val == test`), batch size 1, random
 subsampling to 4,096 points per item as in legacy (so repeats differ slightly).
 """
@@ -24,7 +24,6 @@ from caoa.eval.completion_metrics import CompletionEvaluator, sample_metrics
 from caoa.models.odgnet import UpTrans, load_legacy_checkpoint
 from caoa.paths import REPO_ROOT, load_paths
 
-SERVER_RESULTS = Path("/media/hiranya/KHG Elements/mmlab-server-data/data/hiranya/Github/vr_reconstruction/results")
 RUNS = {  # name: (checkpoint, test-run config, logged [TEST] F / CDL1 / CDL2, per-category csv)
     "S2C-C": ("experiments/UpTrans/S2CCompletion/s2ccompletion_upTransb1/ckpt-best.pth",
               "experiments/config/s2ccompletion_upTransb1/test_S2CC_benchmark/config.yaml", (0.0602, 46.8023, 25.6921), "ODG_S2CC_S2CC.csv"),
@@ -68,7 +67,7 @@ def main():
     paths = load_paths()
     odgnet = paths.legacy_repo / "ODGNet"
     np.random.seed(0)
-    sem = np.load(paths.legacy_repo / "data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy", allow_pickle=True).item()
+    sem = np.load(paths.semantic_embeddings, allow_pickle=True).item()
     dataset = S2CCompletionDataset(load_completion_samples(paths.cache, 0.0, "val"), "val", sem, num_points=4096)
     print(f"S2C-C test set: {len(dataset)} samples")
     device = torch.device("cuda")
@@ -87,7 +86,7 @@ def main():
         load_legacy_checkpoint(model, ckpt)
         runs = [score(model, dataset, device) for _ in range(args.repeats)]
         test = {k: float(np.mean([r["test"][k] for r in runs])) for k in ("F-Score", "CDL1", "CDL2")}
-        legacy_cats = read_category_csv(SERVER_RESULTS / cat_csv) if cat_csv else {}
+        legacy_cats = read_category_csv(paths.legacy_results / cat_csv) if cat_csv else {}
         counts_match = all(runs[0]["per_category"].get(c, {}).get("count") == v["count"] for c, v in legacy_cats.items()) if legacy_cats else None
         report[name] = {"ours_test": test, "logged_test": dict(zip(("F-Score", "CDL1", "CDL2"), logged)),
                         "per_category": runs[0]["per_category"], "legacy_per_category": legacy_cats,
