@@ -51,7 +51,7 @@ Last updated: 2026-10-20 (revised after the legacy-evaluation review; Table 1 gr
 | P3b | Legacy evaluation parity: legacy sample set, legacy reports, Table 1 grouping | **Done** ([results](results/P3b.md)) | Exact 1,864 test set; parity tests; pilot 73.0% vs server 71.2–71.8% |
 | P4 | Data completion: CAD samplers, scene context; full ScanNet (val done, train gated) | **Code done** (caches not built) | CAD↔scan sanity; context parity (both variants) |
 | P5 | Completion datasets: S2C-Completion (completion view), SN-Indoor | **Code done**; cache build awaits approval | Parity with recovered legacy loaders |
-| P6 | CAPCM model: ODGNet port + legacy completion evaluation | **Code done**; re-scoring needs the completion cache | Op/metric parity; re-scored `ODG_*_S2CC.csv` |
+| P6 | CAPCM model: ODGNet port + legacy completion evaluation | **Done** ([results](results/P6.md)) | Op/metric parity; re-scored `ODG_*_S2CC.csv` |
 | P7 | CAPCM training: Table 2 | Planned | Training curves vs logs; Table 2 within tolerance |
 | P8 | OCAM + completion: legacy reproduction, then the leak-free mode | Planned | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | Planned | 95.8% accuracy; legacy embeddings reproduced |
@@ -293,13 +293,13 @@ Validation gate:
 
 Decision needed: SN-Indoor storage.
 
-## P6 — CAPCM model + legacy completion evaluation
+## P6 — CAPCM model + legacy completion evaluation (Done, 2026-10-21; see [results](results/P6.md))
 
 - **Verified (2026-10-20):** current `models/UpTrans.py` compiles to bytecode identical to the legacy Python 3.8 `.pyc`. `utils/metrics.py`, `tools/runner.py`, `tools/builder.py`, `datasets/data_transforms.py`, `extensions/chamfer_dist`, `utils/misc.py` match their 3.8 `.pyc` source size/date. Single, verified sources.
 - **Legacy training recipe from the run configs:** AdamW lr 5e-4, **wd 5e-4**; LambdaLR decay_step 20, ×0.8, lowest_decay 0.01; batch 32; **400 epochs** (the paper says 200); `consider_metric: CDL1`; UpTrans num_pred 8192, num_seeds 1024, seed_fea 128, dim_feat 512, num_dicts 512, upscales [1, 2, 4].
 - **P6a.** Port `ODGNet/models/UpTrans.py` (with the context-flag channel). Pure-torch FPS (`pointnet2_ops` semantics, start index 0), kNN, Chamfer.
 - **P6b.** Losses: multi-level CD-L1 + dictionary orthogonality.
-- **Context flag (user decision 2026-10-20: decide empirically).** Score the context checkpoint on S2C-C val with +1/−1 (pose-time inference, paper) and with 1/0 (ODGNet loader code). Keep the encoding that reproduces its logged best-val CD (22.471).
+- **Context flag: decided empirically on 2026-10-21 as +1/−1.** +1/−1 gives `validate()` CDL1 22.275 vs the stored 22.471; 1/0 gives 30.781.
 - **P6c. Legacy evaluation (E9), reproduced first.**
   - `Metrics` (F-Score at threshold 0.01, CD-L1, CD-L2 ×1e3) ported with a parity test against a verbatim copy.
   - `validate()` (class-averaged) and `test()` (mixed per-sample / per-class averaging) both reproduced.
@@ -311,6 +311,9 @@ Validation gate:
 - Ops and metrics vs brute-force and verbatim references.
 - Every checkpoint loads strictly.
 - The re-scored per-taxonomy tables match `ODG_*_S2CC.csv`, and the `[TEST]` aggregates match the logs. Needs the full test set (P4d-val); on the subset, compare per-taxonomy patterns.
+- **Outcome (2026-10-21):**
+  - Passed: S2C-C 46.835 vs 46.802, PCN 161.537 vs 161.521, SN-34 93.981 vs 94.014; per-category counts exact.
+  - Not reproducible: SN-55 (checkpoint missing); concat and SN-Indoor (`ckpt-last` overwritten after the tests: epochs 227 / 88 vs tested 171 / 42).
 
 ### Implementation status (2026-10-21)
 
@@ -465,7 +468,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 - The paper says Scan2CAD-benchmark evaluation; the code uses the legacy normalised, matched-only metric (E1).
 
 **Table 2**
-- "+Ctxt_100" (22.471 / 2.30) is the best validation score of an S2C-C-only run with context, not SN-Indoor + S2C-C + context.
+- "+Ctxt_100" (22.471 / 2.30) is the best validation score of an S2C-C-only run with context, not SN-Indoor + S2C-C + context. It is also a `validate()` (class-averaged) number; with the `test()` aggregation the other rows use, the same checkpoint scores ~20.6.
 - The SN-Indoor (51.193) and SN-Indoor + S2C-C (34.986) values are not in any log found.
 - Rows mix ODGNet `validate()` and `test()` averaging; the validation set equals the test set.
 
@@ -517,6 +520,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | SEM F1 (94.1) has no code path | Definition unknown | Settle in P9 |
 | ODGNet S2C loader: 10-from-9 unpack at line 466 (crash); unfinished context branch | Can't run as-is | Fixes reviewed with the user (P5a) |
 | ODGNet best-on-test, mixed averaging, "+Ctxt" row from an S2C-C-only run | Table 2 provenance | Reproduce as run (P6/P7) |
+| Concat / SN-Indoor `ckpt-last` overwritten after their Mar 5 tests; SN-55 checkpoint missing | Those Table 2 / log rows can't be re-scored | Retrain in P7 |
 | Official benchmark −center GT reference | Perfect plain poses score 77.2% | Kept; both conventions |
 | Official scale mean / 36-step INF symmetry | Lenient scale; ≤5° slack | Kept |
 | Paper GT row exceeds the official ceiling (76.5%) | Not the official protocol | Legacy + official + matched-only |
