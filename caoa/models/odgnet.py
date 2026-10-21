@@ -81,11 +81,12 @@ def square_distance(src, dst):
 
 
 def query_knn(nsample, xyz, new_xyz, include_self=True):
-    """k-NN of new_xyz in xyz (full sort, as the original)."""
+    """k-NN of new_xyz in xyz. The original fully sorts each row; topk returns the same
+    neighbours in the same order (only exactly tied, i.e. duplicated, points may swap)."""
     pad = 0 if include_self else 1
     sqrdists = square_distance(new_xyz, xyz)
-    _, indices = torch.sort(sqrdists, dim=-1, descending=False)
-    return indices[:, :, pad: nsample + pad].int()
+    _, indices = torch.topk(sqrdists, nsample + pad, dim=-1, largest=False, sorted=True)
+    return indices[:, :, pad:].int()
 
 
 def sample_and_group_knn(xyz, points, npoint, k, use_xyz=True, idx=None):

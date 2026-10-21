@@ -243,7 +243,13 @@ Validation gate:
 
 **P4d. Full ScanNet extraction (gated).**
 - **P4d-val** (**done** 2026-10-20): the 206 missing val scenes, ~3 GB, ~1 h. All 312 val scenes are now local.
-- **P4d-train**: ~700 scenes, ~11.5 GB, ~4 h.
+- **P4d-train** (**done** 2026-10-21): 694 of the 695 missing annotated train scenes, 9.2 GiB. **`scene0212_00` is unavailable**: its archive is an empty 32-byte 7z on every copy (8 matched Scan2CAD models). Re-downloading it from ScanNet needs the user's access.
+  - With it missing, the legacy rule gives **6,663 train pairs = legacy 6,671 − its 8**, and 11,144 of 11,152 matched pairs. Together with the exact 1,864 test set, the legacy pose dataset is reproduced except for that scene.
+- **Local ShapeNet mirror** (user, 2026-10-21: no reading from the external drive). `/home/data/datasets/ShapeNetV2_caoa/`, legacy layout (`ShapeNetV2/`, `ShapeNetV2-augmented/`), only the files the pipeline uses:
+  - 22,213 `model_normalized.obj` (21,499 SN-Indoor + 3,049 S2C CADs, 2,335 shared), 16.9 GiB;
+  - 171,992 SN-Indoor partials, 15.4 GiB;
+  - `taxonomy.json`, `splits.json`, `aug_train_test_splits.pkl`.
+  - Copy verified (194,208 files); `configs/paths.yaml` `shapenet:` points to it.
 
 Findings (2026-10-20) that fix P4's details, all by call path:
 - **Two CAD samplers.**
@@ -347,6 +353,7 @@ Validation gate:
 ## P8 — OCAM + completion
 
 **Legacy reproduction first.**
+- **Completion model (user, 2026-10-21): the paper's final numbers come from the CONCAT checkpoint** (`UpTrans_comp/Concat_SN_S2CC/concat_snaug_s2cc_upTransb_comp`), as `build_completion_pose_datasets.py:132` loads it. The pose configs' cache name `odg_s2ccompletion_upTransb1` is a label, not this evidence.
 - Completion inputs exactly as legacy: GT-instance path in the **GT box frame** (`custom_datasets_pose.py:5000`, `:5024`, `:5063`).
 - Completion inference timing (E10).
 - Inst+completion and completion-only inputs; class rule `relpose_cache`.
@@ -531,13 +538,14 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | Item | Size | Status |
 |---|---|---|
 | uv environment (torch, spconv) | 6.4 GB | done |
-| Pair cache v2 (v1 deleted) | 290 MB | done |
+| Pair cache v2 (v1 deleted) | 552 MB | done (1,505 scenes) |
 | CAD point cache | 0.3–0.6 GB | P4a, to approve |
 | Context (if stored) | est. 1–3 GB | P4b, to approve |
 | Completed-points caches | 0.1–0.4 GB per model/frame | P8 |
 | SN-Indoor local cache (optional) | unknown, measure first | P5c, to approve |
 | ScanNet val scenes (P4d-val) | ~3 GB | done |
-| ScanNet train scenes (P4d-train) | ~11.5 GB | gated |
+| ScanNet train scenes (P4d-train) | 9.2 GiB | done (scene0212_00 unavailable) |
+| Local ShapeNet mirror (CAD .obj + SN-Indoor partials) | 32.3 GiB | done (194,208 files) |
 | SphericalMask env + outputs | est. 6–10 GB | P11b, gated |
 | Checkpoints | ~0.1–0.3 GB per OCAM run | ongoing |
 

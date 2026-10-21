@@ -4,8 +4,10 @@
 # Extracted ScanNet v2 scenes: <scannet_scans>/<scene_id>/<scene_id>_vh_clean_2.ply etc.
 scannet_scans: /home/data/datasets/ScanNet_v2/dataset/scans
 
-# ShapeNetCore v2 (models/model_normalized.obj per CAD model)
-shapenet: "/media/hiranya/KHG Elements/3D Datasets/ShapeNetV2"
+# ShapeNetCore v2 (models/model_normalized.obj per CAD model). Local partial mirror of the
+# external drive's "3D Datasets/ShapeNetV2": only the CAD .obj files the pipeline uses (S2C and
+# SN-Indoor), the SN-Indoor partials in the sibling ShapeNetV2-augmented/, and the split files.
+shapenet: /home/data/datasets/ShapeNetV2_caoa/ShapeNetV2
 
 # Scan2CAD annotations with the S2C-Completion `scannet_instance_id` field
 s2c_annotations: /home/hiranya/research/Github/vr_reconstruction/scan2cad_annotator/scan2cad_v2_completion_annotations.json

@@ -13,11 +13,20 @@ import torch
 
 
 @torch.no_grad()
-def _nearest(src: torch.Tensor, dst: torch.Tensor, chunk: int = 64) -> torch.Tensor:
-    """Index of each src point's nearest dst point; exact squared differences, chunked."""
+def _nearest(src: torch.Tensor, dst: torch.Tensor, max_elements: int = 2 ** 28) -> torch.Tensor:
+    """Index of each src point's nearest dst point.
+
+    The search uses |s|^2 + |d|^2 - 2 s.d (matrix multiply), chunked over src; callers then
+    recompute the exact distance of the chosen pair, so values differ from an exhaustive exact
+    search only when two neighbours are equidistant to within float32 rounding.
+    """
+    B, N, _ = src.shape
+    chunk = max(1, max_elements // (B * dst.shape[1]))
+    dst_sq = (dst * dst).sum(-1)[:, None, :]
     out = []
-    for s in range(0, src.shape[1], chunk):
-        d = ((src[:, s : s + chunk, None, :] - dst[:, None, :, :]) ** 2).sum(-1)
+    for s in range(0, N, chunk):
+        part = src[:, s : s + chunk]
+        d = torch.baddbmm(dst_sq + (part * part).sum(-1)[..., None], part, dst.transpose(1, 2), alpha=-2.0)
         out.append(d.argmin(dim=2))
     return torch.cat(out, dim=1)
 

@@ -1,6 +1,7 @@
 """Functional parity of the legacy GT-instance evaluation (E2, E3, E5), class rules and groupings."""
 
 import itertools
+import json
 
 import numpy as np
 import pytest
@@ -116,3 +117,16 @@ def test_relpose_cache_rule_reproduces_the_legacy_test_set():
     assert counts == INST_CSV_SUPPORT
     assert len(pairs) == 1864
     assert set(CLASS_RULES) == {"v2", "relpose_cache", "all_matched"}
+
+
+@pytest.mark.data
+def test_relpose_cache_rule_reproduces_the_legacy_train_set():
+    """Legacy train set: 6,671 pairs. scene0212_00 (8 matched models) has an empty archive on every copy."""
+    paths = load_paths()
+    train_scenes = set((RESOURCES / "scannetv2_train.txt").read_text().split())
+    cached = {p.stem for p in cache_dir(paths.cache).glob("scene*.pkl")}
+    annotated = set(json.load(open(paths.s2c_annotations)))
+    missing = (train_scenes & annotated) - cached
+    if missing - {"scene0212_00"}:
+        pytest.skip(f"{len(missing)} annotated train scenes not in the pair cache")
+    assert len(load_pairs(paths.cache, "train", class_rule="relpose_cache")) == 6671 - 8 * ("scene0212_00" in missing)

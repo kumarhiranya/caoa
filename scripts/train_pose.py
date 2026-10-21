@@ -97,6 +97,7 @@ def main():
     np.random.seed(cfg["seed"])
     torch.manual_seed(cfg["seed"])
     device = torch.device("cuda")
+    torch.backends.cudnn.benchmark = True  # as legacy (ODGNet main.py:18, train_pose.py)
 
     paths = load_paths()
     data = dict(cfg["data"])
