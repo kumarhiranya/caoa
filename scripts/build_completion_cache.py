@@ -54,10 +54,11 @@ def main():
     parser.add_argument("--estimate", type=int, default=0, help="only build N pairs and extrapolate the cache size")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--limit-scenes", type=int, default=0, help="only the first N train and N val scenes (smoke test)")
+    parser.add_argument("--split", choices=("train", "val"), default=None, help="only this split (e.g. val for evaluation)")
     args = parser.parse_args()
 
     paths = load_paths()
-    pairs = [p for p in load_pairs(paths.cache, class_rule="relpose_cache") if keep_for_completion(p.sem_name)]
+    pairs = [p for p in load_pairs(paths.cache, args.split, class_rule="relpose_cache") if keep_for_completion(p.sem_name)]
     by_scene = {}
     for p in pairs:
         by_scene.setdefault(p.scene_id, []).append(p)
@@ -75,11 +76,15 @@ def main():
     if args.estimate:
         rng = np.random.default_rng(args.seed)
         some = [pairs[i] for i in rng.choice(len(pairs), args.estimate, replace=False)]
-        _, samples = build_scene((some[0].scene_id, some, 0.0, paths, args.seed))
+        groups = {}
+        for p in some:
+            groups.setdefault(p.scene_id, []).append(p)
+        samples = [s for sid, ps in groups.items() for s in build_scene((sid, ps, args.radius, paths, args.seed))[1]]
         per_pair = np.mean([len(pickle.dumps(s, protocol=pickle.HIGHEST_PROTOCOL)) for s in samples])
         n_cad = np.mean([len(s.cad_points) for s in samples])
-        print(f"~{per_pair / 2**10:.0f} KiB per pair without context (mean {n_cad:.0f} CAD points) "
-              f"-> ~{per_pair * len(pairs) / 2**30:.2f} GiB for all pairs; context adds more for radius > 0")
+        n_ctx = np.mean([len(s.context_points) for s in samples])
+        print(f"radius {args.radius}: ~{per_pair / 2**10:.0f} KiB per pair (mean {n_cad:.0f} CAD points, {n_ctx:.0f} context points) "
+              f"-> ~{per_pair * len(pairs) / 2**30:.2f} GiB for all {len(pairs)} pairs")
         return
 
     out = completion_cache_dir(paths.cache, args.radius)
