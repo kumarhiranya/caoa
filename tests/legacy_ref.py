@@ -389,3 +389,69 @@ def get_cadid_valid_names(shapenet_id2names, valid_names):
         if valid_s2c_name is not None:
             catid_to_name[catid] = valid_s2c_name
     return catid_to_name
+
+
+# --- ODGNet/utils/AverageMeter.py (verbatim) and the metric aggregation in ODGNet/tools/runner.py --
+
+class AverageMeter(object):
+    def __init__(self, items=None):
+        self.items = items
+        self.n_items = 1 if items is None else len(items)
+        self.reset()
+
+    def reset(self):
+        self._val = [0] * self.n_items
+        self._sum = [0] * self.n_items
+        self._count = [0] * self.n_items
+
+    def update(self, values):
+        if type(values).__name__ == 'list':
+            for idx, v in enumerate(values):
+                self._val[idx] = v
+                self._sum[idx] += v
+                self._count[idx] += 1
+        else:
+            self._val[0] = values
+            self._sum[0] += values
+            self._count[0] += 1
+
+    def count(self, idx=None):
+        if idx is None:
+            return self._count[0] if self.items is None else [self._count[i] for i in range(self.n_items)]
+        else:
+            return self._count[idx]
+
+    def avg(self, idx=None):
+        if idx is None:
+            return self._sum[0] / self._count[0] if self.items is None else [
+                self._sum[i] / self._count[i] for i in range(self.n_items)
+            ]
+        else:
+            return self._sum[idx] / self._count[idx]
+
+
+def odgnet_validate_aggregate(samples, names=('F-Score', 'CDL1', 'CDL2')):
+    """runner.validate(): per-sample metrics only feed category meters; overall = mean of category means."""
+    test_metrics = AverageMeter(list(names))
+    category_metrics = dict()
+    for taxonomy_id, _metrics in samples:
+        if taxonomy_id not in category_metrics:
+            category_metrics[taxonomy_id] = AverageMeter(list(names))
+        category_metrics[taxonomy_id].update(_metrics)
+    for _, v in category_metrics.items():
+        test_metrics.update(v.avg())
+    return test_metrics.avg(), {k: (v.count(0), v.avg()) for k, v in category_metrics.items()}
+
+
+def odgnet_test_aggregate(samples, names=('F-Score', 'CDL1', 'CDL2')):
+    """runner.test(): per-sample metrics feed both meters, then category means are added to the overall."""
+    test_metrics = AverageMeter(list(names))
+    category_metrics = dict()
+    for taxonomy_id, _metrics in samples:
+        test_metrics.update(_metrics)
+        if taxonomy_id not in category_metrics:
+            category_metrics[taxonomy_id] = AverageMeter(list(names))
+        category_metrics[taxonomy_id].update(_metrics)
+    for _, v in category_metrics.items():
+        test_metrics.update(v.avg())
+    return test_metrics.avg()

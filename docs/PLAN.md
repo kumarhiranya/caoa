@@ -49,9 +49,9 @@ Last updated: 2026-10-20 (revised after the legacy-evaluation review; Table 1 gr
 | P2 | Evaluation core: legacy per-object metric, official Scan2CAD benchmark | **Done** | Exact parity with legacy and upstream scripts |
 | P3 | OCAM object-only (legacy `mnkpv3`) on spconv: pilot | **Done** | Superseded by the P3b re-run |
 | P3b | Legacy evaluation parity: legacy sample set, legacy reports, Table 1 grouping | **Done** ([results](results/P3b.md)) | Exact 1,864 test set; parity tests; pilot 73.0% vs server 71.2–71.8% |
-| P4 | Data completion: CAD point cache, scene context; full ScanNet (val done, train gated) | **Next** | CAD↔scan sanity; context parity (both variants) |
-| P5 | Completion datasets: S2C-Completion (completion view), SN-Indoor | Planned | Parity with recovered legacy loaders |
-| P6 | CAPCM model: ODGNet port + legacy completion evaluation | Planned | Op/metric parity; re-scored `ODG_*_S2CC.csv` |
+| P4 | Data completion: CAD samplers, scene context; full ScanNet (val done, train gated) | **Code done** (caches not built) | CAD↔scan sanity; context parity (both variants) |
+| P5 | Completion datasets: S2C-Completion (completion view), SN-Indoor | **Code done**; cache build awaits approval | Parity with recovered legacy loaders |
+| P6 | CAPCM model: ODGNet port + legacy completion evaluation | **Code done**; re-scoring needs the completion cache | Op/metric parity; re-scored `ODG_*_S2CC.csv` |
 | P7 | CAPCM training: Table 2 | Planned | Training curves vs logs; Table 2 within tolerance |
 | P8 | OCAM + completion: legacy reproduction, then the leak-free mode | Planned | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | Planned | 95.8% accuracy; legacy embeddings reproduced |
@@ -267,11 +267,16 @@ Decisions needed: CAD points per model; context storage; P4d-val now?
 
 ## P5 — Completion datasets
 
-- **P5a. Recover the loaders.** ODGNet is not tracked in the server git, and the server copies are identical to the local, truncated ones. Recovery comes from the **Python 3.8 bytecode** in `ODGNet/datasets/__pycache__/`: `S2CCompletionDataset` source of Feb 28 2025 (28,351 B) and `SNAugDataset` of Mar 1 2025 (19,753 B), i.e. what the legacy ODGNet env last ran.
-  - decompyle3 output (scratchpad `decompiled/*_src.py`) mis-nests blocks in 5 functions per file.
-  - Method: repair until recompiling under Python 3.8 gives **identical bytecode** (objective check). Port from the verified source.
+- **P5a. Loaders.** The current files are complete; the earlier "truncated" reading was a tooling error (see item 2 below). An older compiled snapshot (Python 3.8 `.pyc`, Feb 28 / Mar 1 2025) exists and was decompiled to scratchpad `decompiled/`, but is reference only.
   - **User decision (2026-10-20): build from the CURRENT files** (`ODGNet/datasets/S2CCompletionDataset.py`, `SNAugDataset.py`), not the older snapshot. Anything that looks broken is listed and **reviewed with the user before any fix**. The snapshot serves only as reference evidence. Fixes go into the port; the legacy repo stays untouched unless the user says otherwise.
   - Not to be confused with `datasets/custom_datasets_completion.py`, the older MinkowskiEngine completion pipeline (`train_completion.py`, "mnk" models), which CAPCM does not use.
+  - **Review of the current files (2026-10-20); fixes apply to the port only:**
+    1. `S2CCompletionDataset.py:466` unpacks 10 values from a 9-key dict, so it crashes on every load. **Approved fix:** unpack the 9 fields.
+    2. ~~`__getitem__` has no `return`~~. **Withdrawn.** Line 666 returns `(catid, id_cad, coords, coords_target, sem_embedding, idx)`, the 6-tuple `runner.py:137` expects. The file's last line has no trailing newline (and CRLF endings), so `wc -l` and line-range reads missed it. The same error was behind the earlier "loaders truncated" claim: **both loaders are complete.**
+    3. `sem_embedding` has no source once the 10th field is gone. **Approved fix:** look it up in the same `data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy` that SN-Indoor uses (key `catid_idcad`); only `UpTransv2` reads it.
+    4. The context branch in `__getitem__` is unfinished (`np.ones(n, 1)` TypeError; raw unsampled points replace the normalised input; context not rotated). **Decided: mirror the pose-time inference** (`custom_datasets_pose.py:4661-4697`). Concatenate instance + context with the flag (encoding decided empirically in P6), apply the same yaw to instance, context and target, normalise by the combined centroid and max radius, then sample `num_points`.
+    5. The semantic-model block (lines 158–187, 436–438) is inactive in every config and not ported.
+    6. SN-Indoor's `random.choices` (sampling with replacement, even with downscale factor 1). **Decided: keep as legacy**; a plain-shuffle switch can come later as a fix.
 - **Known from the recovered Feb 28 loader:**
   - **Train inputs are in the GT CAD frame:** `inv(calc_Mcad)`, then a random yaw. **Test inputs are world-oriented**, re-centred and scaled, then `pc_norm`.
   - **Classes:** `('unannotated', 'otherfurniture')` relabel, then **only the 8 VALID_CLASSES are kept** (unlike the pose dataset).
@@ -306,6 +311,23 @@ Validation gate:
 - Ops and metrics vs brute-force and verbatim references.
 - Every checkpoint loads strictly.
 - The re-scored per-taxonomy tables match `ODG_*_S2CC.csv`, and the `[TEST]` aggregates match the logs. Needs the full test set (P4d-val); on the subset, compare per-taxonomy patterns.
+
+### Implementation status (2026-10-21)
+
+Code written and tested (not yet run at scale):
+- **P4a/P4b:**
+  - `caoa/data/shapenet.py`: both CAD samplers; `resample_mesh` is bit-identical to legacy given the same RNG.
+  - `caoa/data/context.py`: all three context rules.
+  - `caoa/data/legacy_sampling.py`: the three legacy samplers.
+- **P5:**
+  - `caoa/data/completion_dataset.py` (S2C-C, approved fixes 1/3/4) and `scripts/build_completion_cache.py`.
+    - Size estimate: **~2.1 GiB as float64 (legacy), ~1.1 GiB as float32**, for 4,308 pairs (2,564 train / 1,744 val = 1,864 minus the non-VALID classes).
+  - `caoa/data/snindoor_dataset.py`: the crop matches legacy exactly under the same seed.
+  - Open: 91 of the 4,308 S2C-C pairs use CADs that are missing from `semantic_embeddings.npy` (fix 3), asked 2026-10-21.
+- **P6:**
+  - `caoa/models/{pointops,chamfer,odgnet}.py`: the UpTrans port reproduces the legacy model's outputs exactly on the same weights (with and without context); every local UpTrans checkpoint loads strictly.
+  - `caoa/eval/completion_metrics.py`: F-Score / CDL1 / CDL2 and the `validate()` / `test()` aggregations match legacy exactly.
+- **P7:** `scripts/train_completion.py` (legacy runner loop, LR + BN-momentum schedulers, val every 10 epochs, ckpt-best by CDL1); configs `configs/completion/legacy_s2cc{,_ctxt1}.yaml`.
 
 ## P7 — CAPCM training (Table 2)
 
@@ -450,6 +472,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 **Datasets and method**
 - S2C-C counts 8,535 = 6,671 / 1,864: the 1,864 test set is reproduced exactly by the RelPose-cache class rule (all per-class supports equal `inst.csv`). Train 6,671 not yet checked (needs P4d-train).
 - SN-Indoor difficulty: paper = 25/50/75% of points removed; code = shift of the crop plane.
+- SN-Indoor categories: the paper describes 35; the training split (`aug_train_test_splits.pkl`) has **7** (table, chair, sofa, cabinet, bathtub, bookshelf, bed); 120,432 train / 51,560 val pairs.
 - Context "enlarged by 100 cm": the code adds 1 m to the total extent (0.5 m per side).
 - OCAM.
   - Paper: Siamese CAD+object with shared weights, SEM input, Chamfer CAD-vs-object ×5, weights t2/r3/s2, AdamW wd 1e-4, 150 epochs.
@@ -492,7 +515,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | Table 1 grouping not in code; avg 86.54 ≠ k/1,864; class avg ≠ mean of the shown columns | Table 1 provenance unclear | P3b.5 hypothesis + validation |
 | Table 1 baseline rows shifted (display dropped) | Misleading comparison | Report from the original papers |
 | SEM F1 (94.1) has no code path | Definition unknown | Settle in P9 |
-| ODGNet loaders truncated locally | Can't run as-is | Recover from `.git` (P5) |
+| ODGNet S2C loader: 10-from-9 unpack at line 466 (crash); unfinished context branch | Can't run as-is | Fixes reviewed with the user (P5a) |
 | ODGNet best-on-test, mixed averaging, "+Ctxt" row from an S2C-C-only run | Table 2 provenance | Reproduce as run (P6/P7) |
 | Official benchmark −center GT reference | Perfect plain poses score 77.2% | Kept; both conventions |
 | Official scale mean / 36-step INF symmetry | Lenient scale; ≤5° slack | Kept |

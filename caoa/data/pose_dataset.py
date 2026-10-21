@@ -15,6 +15,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from caoa.data.legacy_sampling import sample_points, tile_to_min
 from caoa.data.pairs import Pair
 from caoa.geometry import yaw_matrix
 
@@ -29,20 +30,6 @@ class PoseDataConfig:
     scale_aspect_range: tuple[float, float] = (0.0, 0.0)
     trans_range: tuple[float, float] = (-0.5, 0.5)
     test_center: float = 0.1
-
-
-def tile_to_min(points: np.ndarray, n: int) -> np.ndarray:
-    """Repeat a small instance (num // len + 1) times, without truncating."""
-    return np.tile(points, (n // len(points) + 1, 1)) if len(points) < n else points
-
-
-def sample_points(points: np.ndarray, n: int) -> np.ndarray:
-    """Exactly n points: tile and truncate if fewer, random subset if more."""
-    if len(points) < n:
-        return np.tile(points, (n // len(points) + 1, 1))[:n]
-    if len(points) > n:
-        return points[np.random.choice(len(points), n, replace=False)]
-    return points
 
 
 class ObjectPoseDataset(Dataset):

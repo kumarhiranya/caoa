@@ -14,5 +14,8 @@ s2c_annotations: /home/hiranya/research/Github/vr_reconstruction/scan2cad_annota
 scan2cad_full_annotations: /home/hiranya/research/Github/vr_reconstruction/Scan2CAD/dataset/full_annotations.json
 scan2cad_cad_appearances: /home/hiranya/research/Github/vr_reconstruction/Scan2CAD/dataset/cad_appearances.json
 
+# The legacy codebase (read-only reference; used by parity tests)
+legacy_repo: /home/hiranya/research/Github/vr_reconstruction
+
 # Derived data written by this codebase
 cache: cache

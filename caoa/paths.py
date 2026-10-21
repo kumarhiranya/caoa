@@ -17,6 +17,7 @@ class Paths:
     s2c_annotations: Path
     scan2cad_full_annotations: Path
     scan2cad_cad_appearances: Path
+    legacy_repo: Path
     cache: Path
 
 
