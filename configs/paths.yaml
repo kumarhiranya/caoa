@@ -1,0 +1,18 @@
+# Data locations. Copy to configs/paths.local.yaml (git-ignored) to override
+# per machine, or point CAOA_PATHS at another file.
+
+# Extracted ScanNet v2 scenes: <scannet_scans>/<scene_id>/<scene_id>_vh_clean_2.ply etc.
+scannet_scans: /home/data/datasets/ScanNet_v2/dataset/scans
+
+# ShapeNetCore v2 (models/model_normalized.obj per CAD model)
+shapenet: "/media/hiranya/KHG Elements/3D Datasets/ShapeNetV2"
+
+# Scan2CAD annotations with the S2C-Completion `scannet_instance_id` field
+s2c_annotations: /home/hiranya/research/Github/vr_reconstruction/scan2cad_annotator/scan2cad_v2_completion_annotations.json
+
+# Official Scan2CAD benchmark inputs (Scan2CAD/dataset in the Scan2CAD repo)
+scan2cad_full_annotations: /home/hiranya/research/Github/vr_reconstruction/Scan2CAD/dataset/full_annotations.json
+scan2cad_cad_appearances: /home/hiranya/research/Github/vr_reconstruction/Scan2CAD/dataset/cad_appearances.json
+
+# Derived data written by this codebase
+cache: cache

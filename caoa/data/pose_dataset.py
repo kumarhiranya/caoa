@@ -1,0 +1,104 @@
+"""Object-only pose samples, as the legacy `S2CCompletionPoseV2` built them.
+
+Train: points in the canonical frame of the target box (axis-aligned,
+centred, largest side 1), then a random yaw / isotropic scale / translation;
+the target is the transformed box.
+Test: points in the Scan2CAD world frame, scaled so the object's largest
+extent is 1 and shifted so the point mean sits at (0.1, 0.1, 0.1); the target
+is the GT box in that frame. `norm_scale` / `norm_offset` map predictions back
+to metres.
+"""
+
+from dataclasses import dataclass
+
+import numpy as np
+import torch
+from torch.utils.data import Dataset
+
+from caoa.data.pairs import Pair
+from caoa.geometry import yaw_matrix
+
+
+@dataclass(frozen=True)
+class PoseDataConfig:
+    num_points: int = 8192
+    voxel_size: float = 0.01
+    min_points: int = 2048  # instances are tiled up to this when cached (legacy SamplePointsFrom2Array)
+    rot_range_deg: tuple[int, int] = (-180, 180)
+    scale_range: tuple[float, float] = (0.4, 1.4)
+    scale_aspect_range: tuple[float, float] = (0.0, 0.0)
+    trans_range: tuple[float, float] = (-0.5, 0.5)
+    test_center: float = 0.1
+
+
+def tile_to_min(points: np.ndarray, n: int) -> np.ndarray:
+    """Repeat a small instance (num // len + 1) times, without truncating."""
+    return np.tile(points, (n // len(points) + 1, 1)) if len(points) < n else points
+
+
+def sample_points(points: np.ndarray, n: int) -> np.ndarray:
+    """Exactly n points: tile and truncate if fewer, random subset if more."""
+    if len(points) < n:
+        return np.tile(points, (n // len(points) + 1, 1))[:n]
+    if len(points) > n:
+        return points[np.random.choice(len(points), n, replace=False)]
+    return points
+
+
+class ObjectPoseDataset(Dataset):
+    def __init__(self, pairs: list[Pair], train: bool, cfg: PoseDataConfig = PoseDataConfig()):
+        self.pairs = pairs
+        self.train = train
+        self.cfg = cfg
+
+    def __len__(self):
+        return len(self.pairs)
+
+    def _augment(self):
+        cfg = self.cfg
+        yaw = np.radians(np.random.randint(cfg.rot_range_deg[0], cfg.rot_range_deg[1] + 1))
+        scale = np.random.uniform(*cfg.scale_range) + np.random.uniform(*cfg.scale_aspect_range, size=3)
+        t = np.random.uniform(*cfg.trans_range, size=3)
+        return t, yaw_matrix(yaw), scale
+
+    def __getitem__(self, i: int) -> dict:
+        p = self.pairs[i]
+        points = tile_to_min(p.points.astype(np.float64), self.cfg.min_points)
+
+        if self.train:
+            longest = p.box_extents.max()
+            canonical = (points - p.box_center) @ p.box_rotation / longest
+            t, R, scale = self._augment()
+            points = (canonical * scale) @ R.T + t
+            target_t, target_R, target_s = t, R, p.box_extents / longest * scale
+            norm_scale, norm_offset = 1.0, np.zeros(3)
+        else:
+            norm_scale = 1.0 / np.ptp(points, axis=0).max()
+            points = points * norm_scale
+            norm_offset = points.mean(0) - self.cfg.test_center
+            points = points - norm_offset
+            target_t, target_R, target_s = p.box_center * norm_scale - norm_offset, p.box_rotation, p.box_extents * norm_scale
+
+        points = sample_points(points, self.cfg.num_points).astype(np.float32)
+        target = np.concatenate([target_t, target_R.reshape(9), target_s]).astype(np.float32)
+        return {
+            "coords": torch.from_numpy(points / self.cfg.voxel_size),
+            "feats": torch.from_numpy(points),
+            "target": torch.from_numpy(target),
+            "index": i,
+            "norm_scale": norm_scale,
+            "norm_offset": norm_offset,
+        }
+
+
+def collate(samples: list[dict]) -> dict:
+    return {
+        "coords": torch.cat([s["coords"] for s in samples]),
+        "feats": torch.cat([s["feats"] for s in samples]),
+        "batch": torch.cat([torch.full((len(s["coords"]),), b, dtype=torch.int32) for b, s in enumerate(samples)]),
+        "batch_size": len(samples),
+        "target": torch.stack([s["target"] for s in samples]),
+        "index": torch.tensor([s["index"] for s in samples]),
+        "norm_scale": torch.tensor([s["norm_scale"] for s in samples], dtype=torch.float64),
+        "norm_offset": torch.tensor(np.stack([s["norm_offset"] for s in samples])),
+    }
