@@ -455,3 +455,60 @@ def odgnet_test_aggregate(samples, names=('F-Score', 'CDL1', 'CDL2')):
     for _, v in category_metrics.items():
         test_metrics.update(v.avg())
     return test_metrics.avg()
+
+
+# --- datasets/custom_datasets_pose.py, S2CCompletionPoseV2 (P8 completion inference) -------------
+# Verbatim apart from `self` (sample_points is passed in) and the unused time_inference branch.
+
+def pose_sample_points(points, num_points=2048):
+    import random
+
+    import torch
+    tensor_input = isinstance(points, torch.Tensor)
+    if not tensor_input:
+        resampled_points = points.copy()
+    else:
+        resampled_points = points
+    if points.shape[0] < num_points:
+        dup_factor = ((num_points//points.shape[0])+1)
+        if tensor_input:
+            resampled_points = torch.concatenate([points]*dup_factor)
+        else:
+            resampled_points = np.concatenate([points]*dup_factor)
+        resampled_points = resampled_points[:num_points, :]
+    if points.shape[0] > num_points:
+        rand_inds = random.sample([i for i in range(resampled_points.shape[0])], num_points)
+        resampled_points = resampled_points[rand_inds, :]
+    return resampled_points
+
+
+def infer_completion_odg(model, all_points_list, max_bs=8):
+    import torch
+    completed_points = []
+    for mbi in range((len(all_points_list)//max_bs)+1):
+        points_list = all_points_list[mbi*max_bs:(mbi+1)*max_bs]
+        if len(points_list)>0:
+            batch_input = []
+            batch_centers = []
+            batch_m = []
+            for ip, points in enumerate(points_list):
+                in_points = pose_sample_points(points, num_points=4096)
+                in_points = torch.from_numpy(in_points.astype(np.float32)).cuda()
+                centroid = torch.mean(in_points, axis=0)
+                in_points = in_points - centroid
+                m = torch.max(torch.sqrt(torch.sum(in_points**2, axis=1)))
+                in_points = in_points / m
+                in_points = in_points.unsqueeze(0)
+                batch_input.append(in_points)
+                batch_centers.append(centroid)
+                batch_m.append(m)
+            batch_input = torch.concatenate(batch_input, axis=0)
+            ret = model(batch_input)
+            batch_comp = ret[1]
+            for comp_points, m, centroid in zip(batch_comp, batch_m, batch_centers):
+                comp_points = comp_points.detach()
+                comp_points *= m
+                comp_points += centroid
+                comp_points = comp_points.cpu().numpy()
+                completed_points.append(comp_points)
+    return completed_points

@@ -52,8 +52,8 @@ Last updated: 2026-10-20 (revised after the legacy-evaluation review; Table 1 gr
 | P4 | Data completion: CAD samplers, scene context; full ScanNet (val done, train gated) | **Code done** (caches not built) | CAD↔scan sanity; context parity (both variants) |
 | P5 | Completion datasets: S2C-Completion (completion view), SN-Indoor | **Code done**; cache build awaits approval | Parity with recovered legacy loaders |
 | P6 | CAPCM model: ODGNet port + legacy completion evaluation | **Done** ([results](results/P6.md)) | Op/metric parity; re-scored `ODG_*_S2CC.csv` |
-| P7 | CAPCM training: Table 2 | Planned | Training curves vs logs; Table 2 within tolerance |
-| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | Planned | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
+| P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), after P8 | Planned | Training curve vs the legacy log; best ckpt test CDL1 vs 46.80 |
+| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **In progress** | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | Planned | 95.8% accuracy; legacy embeddings reproduced |
 | P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | Planned | Ablation deltas under legacy + official evaluation |
 | P11 | Predicted instances: legacy SoftGroup evaluation, then the official pipeline | Planned | `sg_mnk_comp.csv`, `perclass_results.csv` |
@@ -341,7 +341,9 @@ Code written and tested (not yet run at scale):
 ## P7 — CAPCM training (Table 2)
 
 - Recipe (paper): AdamW 5e-4; LambdaLR step 20, γ 0.8, min 5e-6; CD-L1 + orthogonality; 200 epochs; batch 32. ~1.5 days per run on full data.
-- Runs: S2C-C; SN-Indoor; SN-Indoor + S2C-C; + context 100 cm.
+- **Scope (user, 2026-10-21): retrain S2C-C only**, to check that our training loop reproduces legacy (`s2ccompletion_upTransb1`: best epoch 180, test CDL1 46.80). The other rows are covered by the re-scored legacy checkpoints (P6). Runs after P8.
+- Measured cost (after the Chamfer / k-NN / cudnn.benchmark speed-ups): 0.89 s per batch-32 step, about 19 GPU-hours for 401 epochs. For reference: concat about 38 h, SN-Indoor about 370 h (~15 days); legacy logged 0.83 s per step.
+- (Originally planned runs: S2C-C; SN-Indoor; SN-Indoor + S2C-C; + context 100 cm.)
 - Legacy selection (best on test) and legacy averaging first.
 - The paper's "+Ctxt_100" row is the best *validation* score of an **S2C-C-only** run with context. Reproduce what was run first; the paper's description second.
 
@@ -353,7 +355,23 @@ Validation gate:
 ## P8 — OCAM + completion
 
 **Legacy reproduction first.**
-- **Completion model (user, 2026-10-21): the paper's final numbers come from the CONCAT checkpoint** (`UpTrans_comp/Concat_SN_S2CC/concat_snaug_s2cc_upTransb_comp`), as `build_completion_pose_datasets.py:132` loads it. The pose configs' cache name `odg_s2ccompletion_upTransb1` is a label, not this evidence.
+- **Completion model (user, 2026-10-21): the paper's final numbers come from the CONCAT checkpoint** (`UpTrans_comp/Concat_SN_S2CC/concat_snaug_s2cc_upTransb_comp`, ckpt-best = epoch 219), as `build_completion_pose_datasets.py:132` loads it.
+- **The saved `pose_mnk` runs used S2C-C completions**, not concat: their TensorBoard events are from 2025-02-27 20:47 to 02-28 04:00 UTC, before the first concat training log (2025-03-01). Their cache name `odg_s2ccompletion_upTransb1` = `odg_` + the S2C-C run name, which is how the builder names caches.
+- **User decision (2026-10-21): run both.** (1) S2C-C completions (`s2ccompletion_upTransb1/ckpt-best`, epoch 180), checked against the `pose_mnk` logs; (2) concat completions, the paper's final setup, compared with Table 1 (no saved run uses them).
+- Legacy's completed-pose caches (`data/objects/ScanNet_v2/dataset/instances/scannet_inst_pose_completion_*.npy`) are not on the drive or local, so completions can't be compared file to file; parity rests on the verbatim-code test below and on the alignment results.
+- Code: `caoa/data/pose_completion.py` (inference, verbatim-tested against `infer_completion_odg`), `scripts/build_pose_completions.py` (cache `cache/pose_completions_v1/<name>/`), `ObjectPoseDataset(completions=, completion_mode="only" | "inst+comp")` (legacy `completion_points_only`; frames tested), `data.completion` in the pose configs.
+- Configs `configs/pose/legacy_comp_*.yaml`:
+
+  | Config | Completion | Points | Emb | Steps | Legacy target (best / last) |
+  |---|---|---|---|---|---|
+  | `legacy_comp_s2cc_inst_emb1024` | S2C-C | inst+comp | 1024 | 15k | 81.3 @13k / 80.7 |
+  | `legacy_comp_s2cc_only_emb1024` | S2C-C | only | 1024 | 25k | 87.8 @23k / 87.3 |
+  | `legacy_comp_s2cc_only_emb512` | S2C-C | only | 512 | 25k | 85.0 @22k / 84.8 |
+  | `legacy_comp_s2cc_only_emb256` | S2C-C | only | 256 | 25k | 81.3 @22k / 80.9 |
+  | `legacy_comp_concat_only_emb1024` | concat | only | 1024 | 25k | Table 1 |
+  | `legacy_comp_concat_inst_emb1024` | concat | inst+comp | 1024 | 15k | Table 1 |
+
+  All other settings equal `legacy_nocomp` (server configs compared key by key; `add_embedding_as_feat` is False or the default False in every run).
 - Completion inputs exactly as legacy: GT-instance path in the **GT box frame** (`custom_datasets_pose.py:5000`, `:5024`, `:5063`).
 - Completion inference timing (E10).
 - Inst+completion and completion-only inputs; class rule `relpose_cache`.
@@ -541,7 +559,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | Pair cache v2 (v1 deleted) | 552 MB | done (1,505 scenes) |
 | CAD point cache | 0.3–0.6 GB | P4a, to approve |
 | Context (if stored) | est. 1–3 GB | P4b, to approve |
-| Completed-points caches | 0.1–0.4 GB per model/frame | P8 |
+| Completed-points caches | ~0.8 GB per model (8,527 pairs × 8,192 float32 points) | P8 |
 | SN-Indoor local cache (optional) | unknown, measure first | P5c, to approve |
 | ScanNet val scenes (P4d-val) | ~3 GB | done |
 | ScanNet train scenes (P4d-train) | 9.2 GiB | done (scene0212_00 unavailable) |

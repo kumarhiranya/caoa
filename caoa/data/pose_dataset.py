@@ -7,6 +7,11 @@ Test: points in the Scan2CAD world frame, scaled so the object's largest
 extent is 1 and shifted so the point mean sits at (0.1, 0.1, 0.1); the target
 is the GT box in that frame. `norm_scale` / `norm_offset` map predictions back
 to metres.
+
+With completion (P8), the per-pair completed points (`scripts/build_pose_completions.py`,
+in the same canonical frame; `caoa.data.pose_completion`) replace the instance points (`completion_mode="only"`,
+legacy `completion_points_only`) or are appended to them ("inst+comp"); at test time
+they are mapped back to the world frame first, so the normalisation covers them, as legacy.
 """
 
 from dataclasses import dataclass
@@ -32,11 +37,20 @@ class PoseDataConfig:
     test_center: float = 0.1
 
 
+COMPLETION_MODES = ("only", "inst+comp")
+
+
 class ObjectPoseDataset(Dataset):
-    def __init__(self, pairs: list[Pair], train: bool, cfg: PoseDataConfig = PoseDataConfig()):
+    def __init__(self, pairs: list[Pair], train: bool, cfg: PoseDataConfig = PoseDataConfig(),
+                 completions: dict | None = None, completion_mode: str | None = None):
+        """`completions`: {(scene_id, model_index): (N, 3) canonical-frame points}."""
+        if (completions is None) != (completion_mode is None) or completion_mode not in (None, *COMPLETION_MODES):
+            raise ValueError(f"completions and completion_mode {completion_mode!r} go together; modes: {COMPLETION_MODES}")
         self.pairs = pairs
         self.train = train
         self.cfg = cfg
+        self.completions = completions
+        self.completion_mode = completion_mode
 
     def __len__(self):
         return len(self.pairs)
@@ -51,10 +65,14 @@ class ObjectPoseDataset(Dataset):
     def __getitem__(self, i: int) -> dict:
         p = self.pairs[i]
         points = tile_to_min(p.points.astype(np.float64), self.cfg.min_points)
+        longest = p.box_extents.max()
+        canonical = (points - p.box_center) @ p.box_rotation / longest
+        if self.completion_mode is not None:
+            completed = self.completions[(p.scene_id, p.model_index)].astype(np.float64)
+            canonical = completed if self.completion_mode == "only" else np.concatenate([canonical, completed])
+            points = (canonical * longest) @ p.box_rotation.T + p.box_center  # back to world (legacy denorm_tmat)
 
         if self.train:
-            longest = p.box_extents.max()
-            canonical = (points - p.box_center) @ p.box_rotation / longest
             t, R, scale = self._augment()
             points = (canonical * scale) @ R.T + t
             target_t, target_R, target_s = t, R, p.box_extents / longest * scale
@@ -89,3 +107,4 @@ def collate(samples: list[dict]) -> dict:
         "norm_scale": torch.tensor([s["norm_scale"] for s in samples], dtype=torch.float64),
         "norm_offset": torch.tensor(np.stack([s["norm_offset"] for s in samples])),
     }
+

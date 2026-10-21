@@ -29,15 +29,16 @@ from torch.utils.tensorboard import SummaryWriter
 from caoa.data import scan2cad
 from caoa.data.labels import scannet_split
 from caoa.data.pairs import cache_dir, load_pairs
+from caoa.data.pose_completion import load_pose_completions
 from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate
 from caoa.eval import groupings, pose_eval
 from caoa.models.ocam import OCAMObjectOnly
 from caoa.paths import REPO_ROOT, load_paths
 
 
-def make_loader(pairs, train: bool, cfg: dict, data_cfg: PoseDataConfig, shuffle: bool):
+def make_loader(pairs, train: bool, cfg: dict, data_cfg: PoseDataConfig, shuffle: bool, completions=None, completion_mode=None):
     return DataLoader(
-        ObjectPoseDataset(pairs, train, data_cfg),
+        ObjectPoseDataset(pairs, train, data_cfg, completions, completion_mode),
         batch_size=cfg["train"]["batch_size"],
         shuffle=shuffle,
         num_workers=cfg["train"]["num_workers"],
@@ -102,12 +103,16 @@ def main():
     paths = load_paths()
     data = dict(cfg["data"])
     class_rule = data.pop("class_rule")
+    completion = data.pop("completion", None)  # {name: <pose completion cache>, mode: only | inst+comp}
+    completions = load_pose_completions(paths.cache, completion["name"]) if completion else None
+    completion_mode = completion["mode"] if completion else None
     train_pairs = load_pairs(paths.cache, "train", class_rule=class_rule)
     val_pairs = load_pairs(paths.cache, "val", class_rule=class_rule)
     data_cfg = PoseDataConfig(**{k: tuple(v) if isinstance(v, list) else v for k, v in data.items()})
-    train_loader = make_loader(train_pairs, True, cfg, data_cfg, shuffle=tcfg["shuffle"])
-    val_loader = make_loader(val_pairs, False, cfg, data_cfg, shuffle=False)
-    print(f"class rule {class_rule}: train pairs {len(train_pairs)}, val pairs {len(val_pairs)}")
+    train_loader = make_loader(train_pairs, True, cfg, data_cfg, shuffle=tcfg["shuffle"], completions=completions, completion_mode=completion_mode)
+    val_loader = make_loader(val_pairs, False, cfg, data_cfg, shuffle=False, completions=completions, completion_mode=completion_mode)
+    print(f"class rule {class_rule}: train pairs {len(train_pairs)}, val pairs {len(val_pairs)}"
+          + (f"; completion {completion['name']} ({completion_mode})" if completion else ""))
 
     model = OCAMObjectOnly(embedding=cfg["model"]["embedding"]).to(device)
     if args.eval_only:
