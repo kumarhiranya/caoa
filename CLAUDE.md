@@ -3,9 +3,11 @@
 Clean re-implementation of *CAOA: Completion-Assisted Object-CAD Alignment* (arXiv 2606.18429).
 The legacy research code (`vr_reconstruction`, with its ODGNet fork) is the reference. It isn't in this repo.
 The full copy is on the user's workstation (`~/research/Github/vr_reconstruction`), and a trimmed copy (code, configs,
-logs, the needed checkpoints and annotations) is at `<DATA_ROOT>/legacy` on the DGX. See "Data on the DGX".
+logs, the needed checkpoints and annotations) is at `caoa_data/legacy` on the DGX. See "Data on the DGX".
 
 Read these before working:
+- `docs/HANDOFF_DGX.md`: **start here on the DGX.** Where the data is, what was verified, what isn't there,
+  and the DGX itself (Slurm limits, storage, software).
 - `docs/PLAN.md`: the living plan. Phases P0–P12 with status, validation gates, the legacy evaluation
   inventory (E1–E11), reproduction targets, the legacy duplicate choices (D1–D13), paper-vs-code mismatches,
   and the switch, issue and disk registers.
@@ -36,39 +38,31 @@ Read these before working:
 - **Done:** P0–P3b (data layer, legacy and official metrics, OCAM on spconv, legacy evaluation parity),
   P6 (UpTrans port; re-scored legacy checkpoints within 0.07%). P4/P5: code done and caches built.
 - **The project moved to the DGX on 2026-10-21.** The workstation GPU is shared with other processes.
-  The workstation keeps the source data; the data needed here comes from the transfer bundle (below).
+  The workstation keeps the source data. The data was sent to the DGX on 2026-10-24 and verified (below).
 - **P8 (OCAM + completion): ready, not yet run.** Configs `configs/pose/legacy_comp_*.yaml`; the pose completion caches
-  are in the bundle. The workstation runs were stopped at about 5% to move here. Run them on the DGX (runbook below).
+  are on the DGX. The workstation runs were stopped at about 5% to move here. Run them on the DGX (runbook below).
 - **P7 (CAPCM, S2C-C retraining): ready, not yet run.** Runbook below.
-- P9–P12 are planned. Their data is the bundle's `later/` tier.
+- P9–P12 are planned. Their data is on the DGX too (SEM checkpoints, SoftGroup val predictions, ScanNet, CADs).
 - If anything is still committed from the workstation, `git pull --rebase` before pushing.
 
 ## Data on the DGX
 
-All data lives under one `<DATA_ROOT>`, sent from the workstation as a transfer bundle
-(`scripts/make_transfer_bundle.py`, staged at `/home/data/caoa_dgx_bundle/` there; its `MANIFEST.md` lists every item):
+Sent on 2026-10-24 from the workstation's transfer bundle (`scripts/make_transfer_bundle.py`) and checksum-verified.
+`cp configs/paths.dgx.yaml configs/paths.local.yaml` sets every path. Details, contents and what's missing are in
+`docs/HANDOFF_DGX.md`.
 
-| Tier | Size | Contents | Needed for |
-|---|---|---|---|
-| `now/` | 7.8 GB | caoa caches (pairs, completion r = 0 and r = 1 m, pose completions); a trimmed legacy repo (`legacy/`: code, configs, ODGNet experiment logs, 3 ODGNet `ckpt-best`, annotations, SEM embeddings and splits, legacy target tables, `pose_mnk` logs); ShapeNet split files | P7, P8, the test suite |
-| `later/` | 29.6 GB | ScanNet (4 files per scene), the 3,049 Scan2CAD CADs, SEM checkpoints, SoftGroup val predictions | P9–P12, cache rebuilds |
+| What | Where on the DGX |
+|---|---|
+| `caoa_data/`: caoa caches (pairs, completion r = 0 and r = 1 m, pose completions) and a trimmed legacy repo (`legacy/`: code, configs, ODGNet logs, 3 ODGNet `ckpt-best`, annotations, SEM embeddings, splits and checkpoints, target tables, `pose_mnk` logs, SoftGroup val predictions); 15.2 GB | `/network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data` |
+| ScanNet scans; ShapeNetCore v2 and the SN-Indoor partials (the lab's copies, identical to the workstation's) | `/network/rit/lab/kumar_lab/research_data/3D Datasets/{ScanNet_v2/dataset/scans, ShapeNetV2, ShapeNetV2-augmented}` |
 
-```bash
-# on the workstation
-rsync -aL --info=progress2 /home/data/caoa_dgx_bundle/now/   <dgx>:<DATA_ROOT>/
-rsync -aL --info=progress2 /home/data/caoa_dgx_bundle/later/ <dgx>:<DATA_ROOT>/
-# on the DGX, in this repo
-sed "s|<DATA_ROOT>|/abs/path/to/DATA_ROOT|" configs/paths.dgx.template.yaml > configs/paths.local.yaml
-uv sync --extra train && uv run pytest -q
-```
-
-With only `now/` in place, the tests give 51 passed and 5 skipped (SN-Indoor, CAD meshes, ScanNet). With `later/` too, only
-the SN-Indoor test skips. Not bundled: SN-Indoor partials (16 GB, only for SN-Indoor or concat retraining),
-SoftGroup train predictions, ScanNet `.sens` and 2D data.
+Not on the DGX: ODGNet checkpoints other than the three `ckpt-best` (only P6's re-scoring used them),
+SoftGroup train predictions, ScanNet `.sens` and 2D data. Ask the user if a task needs them.
 
 ## P8 on the DGX: OCAM + completion (legacy inputs)
 
-Details and targets are in PLAN.md § P8. There are six runs, one GPU each:
+Details and targets are in PLAN.md § P8. There are six runs, one GPU each. The commands below are for a machine
+with local GPUs: on the DGX, submit each one as a Slurm job with `--gres=gpu:1` (see `docs/HANDOFF_DGX.md`).
 
 ```bash
 for c in s2cc_only_emb1024 s2cc_inst_emb1024 s2cc_only_emb512 s2cc_only_emb256 concat_only_emb1024 concat_inst_emb1024; do
@@ -78,7 +72,7 @@ done
 
 - The S2C-C runs must match the logged legacy `pose_mnk` runs (best / last): `s2cc_inst_emb1024` 81.3 / 80.7,
   `s2cc_only_emb1024` 87.8 / 87.3, `s2cc_only_emb512` 85.0 / 84.8, `s2cc_only_emb256` 81.3 / 80.9 (legacy metric, 1,864 test set).
-  The logs (`m_train_log.json`, `s2c_total` per 1k steps) are in `<DATA_ROOT>/legacy/checkpoints/pose_mnk/`.
+  The logs (`m_train_log.json`, `s2c_total` per 1k steps) are in `caoa_data/legacy/checkpoints/pose_mnk/`.
 - The concat runs are the paper's final setup; compare them with Table 1 (no saved legacy run).
 - Speed: GPU-bound, because completions fill many more sparse voxels than partial scans. The workstation ran
   at ~1.3 it/s alone, so 15k or 25k steps take a few hours on a free GPU.
@@ -101,8 +95,8 @@ ckpt-best by CDL1, then `test()` on ckpt-best.
 
 ### Data and run
 
-P7 reads only the r = 0 completion cache (`<DATA_ROOT>/caoa_cache/completion_v1_spatial0cm/`: train 6,220 /
-val 1,744 samples) and `semantic_embeddings.npy`, both in the bundle's `now/` tier.
+P7 reads only the r = 0 completion cache (`caoa_data/caoa_cache/completion_v1_spatial0cm/`: train 6,220 /
+val 1,744 samples) and `semantic_embeddings.npy`, both on the DGX.
 
 ```bash
 # smoke test (~10 min): 2 epochs, validation at epoch 1, then test() on ckpt-best; delete its outputs afterwards
@@ -117,9 +111,9 @@ CUDA_VISIBLE_DEVICES=0 uv run python scripts/train_completion.py configs/complet
   On the workstation, it ran out of memory next to other jobs.
 - **Time:** 0.89 s per step on an RTX A6000 (194 steps per epoch, 401 epochs), about 19 h plus validation.
   Expect less on A100/H100.
-- **No `--resume` yet.** If DGX jobs have a time limit under ~20 h, add resume first, after checking with the user.
-  It means saving the optimizer state and best metrics in `ckpt-last`, following ODGNet's
-  `builder.resume_model` / `resume_optimizer`. The legacy run itself was resumed several times (4 logs).
+- **No `--resume`, and none needed:** the DGX QoS allows 7 days per job. If it's ever needed, save the optimizer
+  state and best metrics in `ckpt-last`, following ODGNet's `builder.resume_model` / `resume_optimizer`
+  (check with the user first). The legacy run itself was resumed several times (4 logs).
 - **Outputs** (`outputs/legacy_s2cc/`, git-ignored): `config.yaml`, `train_log.json`, `ckpt-best.pth`,
   `ckpt-last.pth`, `ckpt-epoch-*.pth` (last 10, as legacy), `test_results.json`. Checkpoints are 46 MB each,
   weights only; legacy's 138 MB also held the optimizer state.

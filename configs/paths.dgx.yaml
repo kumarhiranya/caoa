@@ -1,0 +1,15 @@
+# Data locations on the UAlbany DGX (dgx-head01), as transferred on 2026-10-24. Use with:
+#   cp configs/paths.dgx.yaml configs/paths.local.yaml      (or: export CAOA_PATHS=configs/paths.dgx.yaml)
+# caoa_data/ is the transfer bundle (scripts/make_transfer_bundle.py) without ScanNet and ShapeNet. Those two
+# point at the lab's existing dataset copies, which match the bundle's files byte for byte (MD5 of all 9,092).
+# The ShapeNet copy is the full ShapeNetCore v2, with the SN-Indoor partials next to it (ShapeNetV2-augmented).
+
+scannet_scans: /network/rit/lab/kumar_lab/research_data/3D Datasets/ScanNet_v2/dataset/scans
+shapenet: /network/rit/lab/kumar_lab/research_data/3D Datasets/ShapeNetV2
+s2c_annotations: /network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data/legacy/scan2cad_annotator/scan2cad_v2_completion_annotations.json
+scan2cad_full_annotations: /network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data/legacy/Scan2CAD/dataset/full_annotations.json
+scan2cad_cad_appearances: /network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data/legacy/Scan2CAD/dataset/cad_appearances.json
+legacy_repo: /network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data/legacy
+semantic_embeddings: /network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data/legacy/data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy
+legacy_results: /network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data/legacy/results
+cache: /network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data/caoa_cache

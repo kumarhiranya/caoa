@@ -25,4 +25,5 @@ Status 2026-10-21: P4–P7 code is written and tested (uncommitted): the UpTrans
 - **The whole project moved to the DGX** (user, 2026-10-21; the workstation GPU is shared with ollama and steam). P8 runs were stopped at ~5%. P7 and P8 both run on the DGX.
 - The data goes over as a transfer bundle. `scripts/make_transfer_bundle.py` staged it at `/home/data/caoa_dgx_bundle/{now,later}`: symlink trees plus 0.5 GB of drive copies; `now/` is 7.8 GB, `later/` 29.6 GB. On the DGX it's set up with `configs/paths.dgx.template.yaml`.
 - The repo's `CLAUDE.md` and `docs/claude_context/` (copies of these memory notes) carry the context. Pull before pushing, since two machines commit.
+- **Data sent 2026-10-24** (workstation on the GlobalProtect VPN, ~16 MB/s): 15.2 GB to `/network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data` on the DGX (the user chose this folder), checksum-verified. ScanNet and ShapeNet were not sent because the lab's `3D Datasets` copies are MD5-identical. `configs/paths.dgx.yaml` holds the DGX paths; `docs/HANDOFF_DGX.md` is the handoff note for the DGX agent. The user said a separate agent on the DGX does the setup and runs.
 

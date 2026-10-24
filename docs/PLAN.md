@@ -343,8 +343,8 @@ Code written and tested (not yet run at scale):
 - Recipe (paper): AdamW 5e-4; LambdaLR step 20, γ 0.8, min 5e-6; CD-L1 + orthogonality; 200 epochs; batch 32. ~1.5 days per run on full data.
 - **Scope (user, 2026-10-21): retrain S2C-C only**, to check that our training loop reproduces legacy (`s2ccompletion_upTransb1`: best epoch 180, test CDL1 46.80). The other rows are covered by the re-scored legacy checkpoints (P6). Runs after P8.
 - Measured cost (after the Chamfer / k-NN / cudnn.benchmark speed-ups): 0.89 s per batch-32 step, about 19 GPU-hours for 401 epochs. For reference: concat about 38 h, SN-Indoor about 370 h (~15 days); legacy logged 0.83 s per step.
-- **Runs on the user's DGX** (2026-10-21). Runbook, data to copy (r = 0 completion cache, 2.0 GB, and `semantic_embeddings.npy`, 46 MB; now a `paths.yaml` entry) and targets are in `CLAUDE.md`. The legacy validation curve (39 points, epochs 10–390) is in `results/legacy_curves/s2ccompletion_upTransb1_val.csv`.
-- Batch 32 needs about 40 GB of GPU memory (legacy logged 39.99 GB). `train_completion.py` has no resume yet.
+- **Runs on the user's DGX** (2026-10-21). Runbook and targets are in `CLAUDE.md`; its data (r = 0 completion cache, 2.0 GB, and `semantic_embeddings.npy`, 46 MB; a `paths.yaml` entry) is on the DGX since 2026-10-24 (`docs/HANDOFF_DGX.md`). The legacy validation curve (39 points, epochs 10–390) is in `results/legacy_curves/s2ccompletion_upTransb1_val.csv`.
+- Batch 32 needs about 40 GB of GPU memory (legacy logged 39.99 GB). `train_completion.py` has no resume; the DGX's 7-day job limit makes it unnecessary.
 - (Originally planned runs: S2C-C; SN-Indoor; SN-Indoor + S2C-C; + context 100 cm.)
 - Legacy selection (best on test) and legacy averaging first.
 - The paper's "+Ctxt_100" row is the best *validation* score of an **S2C-C-only** run with context. Reproduce what was run first; the paper's description second.
@@ -563,7 +563,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | CAD point cache | 0.3–0.6 GB | P4a, to approve |
 | Context (if stored) | est. 1–3 GB | P4b, to approve |
 | Completed-points caches | ~0.8 GB per model (8,527 pairs × 8,192 float32 points) | P8, done |
-| DGX transfer bundle (`/home/data/caoa_dgx_bundle`) | symlinks + 0.5 GB copied from the drive; sends 7.8 GB (`now/`) + 29.6 GB (`later/`) | done |
+| DGX transfer bundle (`/home/data/caoa_dgx_bundle`) | symlinks + 0.5 GB copied from the drive; 7.8 GB (`now/`) + 29.6 GB (`later/`) | done; sent 2026-10-24 without ScanNet/ShapeNet (already on the DGX, MD5-identical): 15.2 GB on the DGX's lab storage (`docs/HANDOFF_DGX.md`) |
 | SN-Indoor local cache (optional) | unknown, measure first | P5c, to approve |
 | ScanNet val scenes (P4d-val) | ~3 GB | done |
 | ScanNet train scenes (P4d-train) | 9.2 GiB | done (scene0212_00 unavailable) |
