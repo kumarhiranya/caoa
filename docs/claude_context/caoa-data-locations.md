@@ -27,5 +27,5 @@ Still not found: a CAPCM+SEM alignment checkpoint (all pose_mnk runs are type `m
 
 **DGX (2026-10-24):** `~/lab` = `/network/rit/lab/kumar_lab` (5.8 TB free); `~/dgx_lab` = `/network/rit/dgx/dgx_kumar_lab` (96% full); home has a 13 GB quota.
 - The lab already has `research_data/3D Datasets/{ScanNet_v2/dataset/scans, ShapeNetV2, ShapeNetV2-augmented, Scan2CAD}`. They're identical to the workstation data (MD5 for the bundle's files, sizes for the whole ShapeNet mirror). `scene0212_00` is missing there too.
-- The CAOA data package is at `research_data/Github/vr_reconstruction/caoa_data`, and the caoa clone is in `~/dgx_lab/research_data/Github/caoa`.
+- The CAOA data package is at `research_data/3D Datasets/caoa_data` (moved there from `research_data/Github/vr_reconstruction/caoa_data` on 2026-10-24). Inside the Slurm jobs' pyxis container the lab share is `/workspace/lab`, so `configs/paths.local.yaml` there uses that prefix. And the caoa clone is in `~/dgx_lab/research_data/Github/caoa`.
 - The DGX is reachable from the workstation only over the GlobalProtect VPN (`ssh dgx`).

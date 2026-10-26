@@ -9,15 +9,19 @@ Workstation-side context is in `docs/claude_context/` (paths there refer to the 
 | What | Path on the DGX |
 |---|---|
 | This repo (cloned 2026-10-21 at `d8f8b76`; `git pull` first) | `~/dgx_lab/research_data/Github/caoa` (= `/network/rit/dgx/dgx_kumar_lab/research_data/Github/caoa`) |
-| Data package: `caoa_cache/` + `legacy/` (11,201 files, 15.2 GB) | `/network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data` |
+| Data package: `caoa_cache/` + `legacy/` (11,201 files, 15.2 GB) | `/network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data` |
 | ScanNet scans (the 4 files per scene we use) | `/network/rit/lab/kumar_lab/research_data/3D Datasets/ScanNet_v2/dataset/scans` |
 | ShapeNetCore v2 (CADs, split files) and the SN-Indoor partials | `/network/rit/lab/kumar_lab/research_data/3D Datasets/ShapeNetV2` and `.../ShapeNetV2-augmented` |
 
-Set the paths with `cp configs/paths.dgx.yaml configs/paths.local.yaml` (or `export CAOA_PATHS=configs/paths.dgx.yaml`).
+These are the lab share's host paths (login node). The training runs happen inside the Slurm job's pyxis
+container, where the lab share is mounted only at `/workspace/lab` (and `~/dgx_lab` at `/workspace/dgx_lab` as
+well as its `/network/...` path). Set the paths there with
+`sed "s|/network/rit/lab/kumar_lab|/workspace/lab|" configs/paths.dgx.yaml > configs/paths.local.yaml`;
+outside the container, `cp configs/paths.dgx.yaml configs/paths.local.yaml`.
 
-- `caoa_data` sits inside the lab's old `vr_reconstruction` checkout (the user's choice), so it shows up there as
-  untracked. Don't commit it to that repo, and don't confuse that checkout with the legacy reference:
-  the legacy code we compare against is `caoa_data/legacy` (`paths.legacy_repo`).
+- `caoa_data` was first sent into the lab's old `vr_reconstruction` checkout; the user moved it next to the lab
+  datasets on 2026-10-24. The legacy code we compare against is `caoa_data/legacy` (`paths.legacy_repo`), not
+  that checkout.
 - ScanNet and ShapeNet were not sent: the lab already had them. For every file the package would have carried
   (6,036 ScanNet files, 3,049 CAD models, 3 ShapeNet split files, 4 Scan2CAD files) the DGX copy has the same MD5.
   All 194,208 files of the workstation's ShapeNet mirror (CADs used by S2C and SN-Indoor, and the 171,992 SN-Indoor

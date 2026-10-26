@@ -48,12 +48,13 @@ Read these before working:
 ## Data on the DGX
 
 Sent on 2026-10-24 from the workstation's transfer bundle (`scripts/make_transfer_bundle.py`) and checksum-verified.
-`cp configs/paths.dgx.yaml configs/paths.local.yaml` sets every path. Details, contents and what's missing are in
+The runs happen inside the Slurm job's pyxis container, where the lab share is mounted at `/workspace/lab`:
+`sed "s|/network/rit/lab/kumar_lab|/workspace/lab|" configs/paths.dgx.yaml > configs/paths.local.yaml` sets every path. Details, contents and what's missing are in
 `docs/HANDOFF_DGX.md`.
 
 | What | Where on the DGX |
 |---|---|
-| `caoa_data/`: caoa caches (pairs, completion r = 0 and r = 1 m, pose completions) and a trimmed legacy repo (`legacy/`: code, configs, ODGNet logs, 3 ODGNet `ckpt-best`, annotations, SEM embeddings, splits and checkpoints, target tables, `pose_mnk` logs, SoftGroup val predictions); 15.2 GB | `/network/rit/lab/kumar_lab/research_data/Github/vr_reconstruction/caoa_data` |
+| `caoa_data/`: caoa caches (pairs, completion r = 0 and r = 1 m, pose completions) and a trimmed legacy repo (`legacy/`: code, configs, ODGNet logs, 3 ODGNet `ckpt-best`, annotations, SEM embeddings, splits and checkpoints, target tables, `pose_mnk` logs, SoftGroup val predictions); 15.2 GB | `/network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data` |
 | ScanNet scans; ShapeNetCore v2 and the SN-Indoor partials (the lab's copies, identical to the workstation's) | `/network/rit/lab/kumar_lab/research_data/3D Datasets/{ScanNet_v2/dataset/scans, ShapeNetV2, ShapeNetV2-augmented}` |
 
 Not on the DGX: ODGNet checkpoints other than the three `ckpt-best` (only P6's re-scoring used them),
