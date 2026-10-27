@@ -5,7 +5,7 @@ Clean re-implementation of *CAOA: Completion-Assisted Object-CAD Alignment*
 (`~/research/Github/vr_reconstruction`) only as a reference.
 
 Living document: update the status column and the phase sections as work lands.
-Last updated: 2026-10-21. The project moved to the DGX (the workstation GPU is shared). Data comes from the transfer bundle (`scripts/make_transfer_bundle.py`; see `CLAUDE.md`). The repo is https://github.com/kumarhiranya/caoa.
+Last updated: 2026-10-27 (P7 and P8 legacy reproduction done on the DGX). The project moved to the DGX (the workstation GPU is shared). Data comes from the transfer bundle (`scripts/make_transfer_bundle.py`; see `CLAUDE.md`). The repo is https://github.com/kumarhiranya/caoa.
 
 ## Ground rules
 
@@ -52,8 +52,8 @@ Last updated: 2026-10-21. The project moved to the DGX (the workstation GPU is s
 | P4 | Data completion: CAD samplers, scene context; full ScanNet | **Code done; data local, caches built** (2026-10-21; `scene0212_00` unavailable) | CAD↔scan sanity; context parity (both variants) |
 | P5 | Completion datasets: S2C-Completion (completion view), SN-Indoor | **Code done; caches built** (r = 0: 2.0 GB, r = 1 m: 2.8 GB; train 6,220 / val 1,744) | Parity with recovered legacy loaders |
 | P6 | CAPCM model: ODGNet port + legacy completion evaluation | **Done** ([results](results/P6.md)) | Op/metric parity; re-scored `ODG_*_S2CC.csv` |
-| P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), **on the DGX** | Ready (runbook in `CLAUDE.md`) | Val curve vs `results/legacy_curves/s2ccompletion_upTransb1_val.csv`; ckpt-best test CDL1 vs 46.80 |
-| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Ready**: code, configs and completion caches; to run on the DGX | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
+| P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), **on the DGX** | **Done** ([results](results/P7.md)): test CDL1 45.00 vs 46.80; accepted by the user 2026-10-27 | Val curve vs `results/legacy_curves/s2ccompletion_upTransb1_val.csv`; ckpt-best test CDL1 vs 46.80 |
+| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Legacy reproduction done** ([results](results/P8.md)): 87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3; leak-free mode next | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | Planned | 95.8% accuracy; legacy embeddings reproduced |
 | P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | Planned | Ablation deltas under legacy + official evaluation |
 | P11 | Predicted instances: legacy SoftGroup evaluation, then the official pipeline | Planned | `sg_mnk_comp.csv`, `perclass_results.csv` |
@@ -354,6 +354,8 @@ Validation gate:
 - Table 2 rows within the agreed tolerance under the matching legacy protocol.
 - GPU budget agreed beforehand.
 
+**Outcome (2026-10-27, [results](results/P7.md)): passed, accepted by the user.** DGX A100, 0.60 s/step, ~15.7 h with validation. Best validation CDL1 42.93 @ epoch 70 (legacy 43.60 @ 180); test on ckpt-best F 0.0594 / CDL1 45.00 / CDL2 23.06 (legacy 0.0602 / 46.80 / 25.69). The validation curve tracks legacy within ~1–2 CDL1 at every epoch.
+
 ## P8 — OCAM + completion
 
 **Legacy reproduction first.**
@@ -379,6 +381,8 @@ Validation gate:
 - Completion inference timing (E10).
 - Inst+completion and completion-only inputs; class rule `relpose_cache`.
 - Targets: `pose_mnk` logs (81.3% / 87.8% / 85.0% / 81.3%), `comp.csv`, `compinst.csv` (pattern).
+
+**Outcome of the legacy reproduction (2026-10-27, [results](results/P8.md)): passed.** All six runs on the DGX (one A100, ~2.5 it/s, 11 h in total). Best legacy metric: S2C-C only emb 1024 / 512 / 256 = 87.8 / 85.6 / 82.7 (legacy 87.8 / 85.0 / 81.3), S2C-C inst+comp 81.9 (81.3); concat only 87.4, concat inst+comp 82.5. Final models: official protocol 35–39% (plain) / 46–51% (−center).
 
 **Then the fix (switch `completion_frame`):** `world`-frame completion, which uses no GT. Quantify the leak: the same OCAM evaluated with both completion frames.
 

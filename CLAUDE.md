@@ -33,15 +33,16 @@ Read these before working:
 8. **Process:** every phase ends with a validation gate. Write a results note in `docs/results/`, update
    PLAN.md, and commit after the phase passes (WIP commits are OK). Don't commit `cache/` or `outputs/`.
 
-## Status (2026-10-21)
+## Status (2026-10-27)
 
 - **Done:** P0–P3b (data layer, legacy and official metrics, OCAM on spconv, legacy evaluation parity),
   P6 (UpTrans port; re-scored legacy checkpoints within 0.07%). P4/P5: code done and caches built.
 - **The project moved to the DGX on 2026-10-21.** The workstation GPU is shared with other processes.
   The workstation keeps the source data. The data was sent to the DGX on 2026-10-24 and verified (below).
-- **P8 (OCAM + completion): ready, not yet run.** Configs `configs/pose/legacy_comp_*.yaml`; the pose completion caches
-  are on the DGX. The workstation runs were stopped at about 5% to move here. Run them on the DGX (runbook below).
-- **P7 (CAPCM, S2C-C retraining): ready, not yet run.** Runbook below.
+- **P7 done** (2026-10-27, `docs/results/P7.md`): S2C-C retrained, test CDL1 45.00 vs legacy 46.80; accepted by the user.
+- **P8 legacy reproduction done** (2026-10-27, `docs/results/P8.md`): all six runs; the S2C-C runs match the `pose_mnk`
+  logs (87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3). Next in P8: the leak-free `world`-frame completion
+  (a fix: discuss with the user first). The runbooks below are kept for reference.
 - P9–P12 are planned. Their data is on the DGX too (SEM checkpoints, SoftGroup val predictions, ScanNet, CADs).
 - If anything is still committed from the workstation, `git pull --rebase` before pushing.
 
