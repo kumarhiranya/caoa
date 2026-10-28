@@ -30,15 +30,16 @@ from caoa.data import scan2cad
 from caoa.data.labels import scannet_split
 from caoa.data.pairs import cache_dir, load_pairs
 from caoa.data.pose_completion import load_pose_completions
-from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate
+from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate, load_sym_embeddings
 from caoa.eval import groupings, pose_eval
 from caoa.models.ocam import OCAMObjectOnly
 from caoa.paths import REPO_ROOT, load_paths
 
 
-def make_loader(pairs, train: bool, cfg: dict, data_cfg: PoseDataConfig, shuffle: bool, completions=None, completion_mode=None):
+def make_loader(pairs, train: bool, cfg: dict, data_cfg: PoseDataConfig, shuffle: bool, completions=None, completion_mode=None,
+                sym_embeddings=None):
     return DataLoader(
-        ObjectPoseDataset(pairs, train, data_cfg, completions, completion_mode),
+        ObjectPoseDataset(pairs, train, data_cfg, completions, completion_mode, sym_embeddings),
         batch_size=cfg["train"]["batch_size"],
         shuffle=shuffle,
         num_workers=cfg["train"]["num_workers"],
@@ -47,8 +48,13 @@ def make_loader(pairs, train: bool, cfg: dict, data_cfg: PoseDataConfig, shuffle
     )
 
 
+def model_inputs(batch, device):
+    ext = batch["sym_emb"].to(device) if "sym_emb" in batch else None  # legacy "mnkpv3_emb" (P10a)
+    return batch["coords"].to(device), batch["feats"].to(device), batch["batch"].to(device), batch["batch_size"], ext
+
+
 def forward(model, batch, device):
-    return model(batch["coords"].to(device), batch["feats"].to(device), batch["batch"].to(device), batch["batch_size"])
+    return model(*model_inputs(batch, device))
 
 
 @torch.no_grad()
@@ -59,7 +65,7 @@ def predict(model, loader, device, timed=False):
     out = {"pred": [], "target": [], "norm_scale": [], "norm_offset": [], "index": []}
     legacy_ms, synced_ms = [], []
     for batch in loader:
-        inputs = (batch["coords"].to(device), batch["feats"].to(device), batch["batch"].to(device), batch["batch_size"])
+        inputs = model_inputs(batch, device)
         if timed:
             torch.cuda.synchronize()
         start = time.time()
@@ -103,18 +109,24 @@ def main():
     paths = load_paths()
     data = dict(cfg["data"])
     class_rule = data.pop("class_rule")
-    completion = data.pop("completion", None)  # {name: <pose completion cache>, mode: only | inst+comp}
-    completions = load_pose_completions(paths.cache, completion["name"]) if completion else None
+    completion = data.pop("completion", None)  # {name: <pose completion cache>, mode: only | inst+comp, frame: legacy | world}
+    completions = load_pose_completions(paths.cache, completion["name"], completion.get("frame", "legacy")) if completion else None
     completion_mode = completion["mode"] if completion else None
+    # P10a: SEM symmetry embedding of the GT CAD (legacy `symmetry_model_name`, data/s2c_symmetry/<name>/embeddings.npy)
+    sym_model = cfg["model"].get("sym_embedding")
+    sym_embeddings = load_sym_embeddings(paths.legacy_repo / "data/s2c_symmetry" / sym_model / "embeddings.npy") if sym_model else None
     train_pairs = load_pairs(paths.cache, "train", class_rule=class_rule)
     val_pairs = load_pairs(paths.cache, "val", class_rule=class_rule)
     data_cfg = PoseDataConfig(**{k: tuple(v) if isinstance(v, list) else v for k, v in data.items()})
-    train_loader = make_loader(train_pairs, True, cfg, data_cfg, shuffle=tcfg["shuffle"], completions=completions, completion_mode=completion_mode)
-    val_loader = make_loader(val_pairs, False, cfg, data_cfg, shuffle=False, completions=completions, completion_mode=completion_mode)
+    train_loader = make_loader(train_pairs, True, cfg, data_cfg, shuffle=tcfg["shuffle"], completions=completions, completion_mode=completion_mode,
+                               sym_embeddings=sym_embeddings)
+    val_loader = make_loader(val_pairs, False, cfg, data_cfg, shuffle=False, completions=completions, completion_mode=completion_mode,
+                             sym_embeddings=sym_embeddings)
     print(f"class rule {class_rule}: train pairs {len(train_pairs)}, val pairs {len(val_pairs)}"
-          + (f"; completion {completion['name']} ({completion_mode})" if completion else ""))
+          + (f"; completion {completion['name']} ({completion_mode}, frame {completion.get('frame', 'legacy')})" if completion else ""))
 
-    model = OCAMObjectOnly(embedding=cfg["model"]["embedding"]).to(device)
+    ext_emb_size = len(next(iter(sym_embeddings.values()))) if sym_embeddings else 0
+    model = OCAMObjectOnly(embedding=cfg["model"]["embedding"], ext_emb_size=ext_emb_size).to(device)
     if args.eval_only:
         model.load_state_dict(torch.load(args.eval_only, map_location=device)["model"])
     else:

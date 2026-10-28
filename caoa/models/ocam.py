@@ -3,6 +3,8 @@
 Layer layout, widths, activations and initialisation follow the legacy model
 (`utils/model_utils.py`); the ME semantics it depends on are in `sparse.py`.
 Outputs translation (3), rotation as a tanh-squashed 3x3 matrix (9), scale (3).
+With `ext_emb_size > 0` it is the legacy `MinkowskiFCNNP_v3_emb` ("mnkpv3_emb", P10a): an external
+embedding (the SEM symmetry embedding of the CAD) is concatenated to the pooled feature before the heads.
 """
 
 import math
@@ -35,9 +37,9 @@ def head(in_ch: int, hidden: int, out_ch: int, tanh: bool = False) -> nn.Sequent
 
 
 class OCAMObjectOnly(nn.Module):
-    """Legacy "mnkpv3": completed (or raw) object points -> 9-DoF box pose."""
+    """Legacy "mnkpv3" (and "mnkpv3_emb"): completed (or raw) object points [+ external embedding] -> 9-DoF box pose."""
 
-    def __init__(self, in_channels=3, embedding=1024, channels=(32, 48, 64, 96, 128), rotation_dims=9):
+    def __init__(self, in_channels=3, embedding=1024, channels=(32, 48, 64, 96, 128), rotation_dims=9, ext_emb_size=0):
         super().__init__()
         c = channels
         self.mlp1 = mlp_block(in_channels, c[0])
@@ -51,9 +53,11 @@ class OCAMObjectOnly(nn.Module):
             conv_block(embedding // 4, embedding // 2, stride=2),
             conv_block(embedding // 2, embedding, stride=2),
         )
-        self.translation = head(2 * embedding, 64, 3)
-        self.rotation = head(2 * embedding, 256, rotation_dims, tanh=True)
-        self.scale = head(2 * embedding, 64, 3)
+        self.ext_emb_size = ext_emb_size
+        feat = 2 * embedding + ext_emb_size
+        self.translation = head(feat, 64, 3)
+        self.rotation = head(feat, 256, rotation_dims, tanh=True)
+        self.scale = head(feat, 64, 3)
         self._init_weights()
 
     def _init_weights(self):
@@ -66,8 +70,12 @@ class OCAMObjectOnly(nn.Module):
                 nn.init.constant_(m.weight, 1)
                 nn.init.constant_(m.bias, 0)
 
-    def forward(self, coords: torch.Tensor, feats: torch.Tensor, batch: torch.Tensor, batch_size: int) -> torch.Tensor:
-        """coords: (N, 3) point coordinates divided by the voxel size; feats: (N, C); batch: (N,)."""
+    def forward(self, coords: torch.Tensor, feats: torch.Tensor, batch: torch.Tensor, batch_size: int,
+                ext_emb: torch.Tensor | None = None) -> torch.Tensor:
+        """coords: (N, 3) point coordinates divided by the voxel size; feats: (N, C); batch: (N,);
+        ext_emb: (batch_size, ext_emb_size), required iff the model was built with ext_emb_size > 0."""
+        if (ext_emb is None) != (self.ext_emb_size == 0):
+            raise ValueError(f"model built with ext_emb_size={self.ext_emb_size}, got ext_emb={'None' if ext_emb is None else tuple(ext_emb.shape)}")
         point_feats = self.mlp1(feats)
         x, _ = sparse.voxelize(coords, point_feats, batch, batch_size)
 
@@ -81,4 +89,6 @@ class OCAMObjectOnly(nn.Module):
         )
         y = self.conv5(x.replace_feature(multi_scale))
         pooled = sparse.global_max_avg_pool(y)
+        if ext_emb is not None:
+            pooled = torch.cat([pooled, ext_emb], dim=1)
         return torch.cat([self.translation(pooled), self.rotation(pooled), self.scale(pooled)], dim=1)

@@ -36,6 +36,7 @@ train = [
     "torch==2.9.1",
     "spconv-cu126==2.3.8",
     "tensorboard>=2.18",
+    "addict>=2.4",
 ]
 
 [tool.uv.sources]

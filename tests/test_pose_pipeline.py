@@ -100,3 +100,49 @@ def test_model_forward_backward(val_pairs):
     assert out.shape == (8, 15)
     out.abs().sum().backward()
     assert all(p.grad is not None for p in model.parameters() if p.requires_grad)
+
+
+SYM_MODEL = "S2Csym_emb128_bce_vox1cm_wd1e-03_b64_lr1e-04_bbcls-ptv3-v1m1-0-shapenet_v2_mini_ptv3cls_softmax_symbinary_cad_bce_adam_cosineannealing"
+SYM_PATH = PATHS.legacy_repo / "data/s2c_symmetry" / SYM_MODEL / "embeddings.npy"
+needs_sym = pytest.mark.skipif(not SYM_PATH.exists(), reason="legacy SEM embeddings missing")
+
+
+@needs_pairs
+@needs_sym
+def test_sym_embeddings_cover_every_pair():
+    """P10a: legacy looks up `sym_map[catid_idcad][1]` for every pose pair, so every CAD needs an embedding."""
+    from caoa.data.pose_dataset import load_sym_embeddings
+
+    emb = load_sym_embeddings(SYM_PATH)
+    assert {e.shape for e in emb.values()} == {(128,)}
+    pairs = load_pairs(PATHS.cache, class_rule="relpose_cache")
+    assert all(f"{p.catid_cad}_{p.id_cad}" in emb for p in pairs)
+
+
+@needs_cuda
+@needs_pairs
+@needs_sym
+def test_model_with_sym_embedding(val_pairs):
+    """Legacy "mnkpv3_emb": the embedding is concatenated to the pooled feature, so the heads see it."""
+    from caoa.data.pose_dataset import load_sym_embeddings
+    from caoa.models.ocam import OCAMObjectOnly
+
+    emb = load_sym_embeddings(SYM_PATH)
+    ds = ObjectPoseDataset(val_pairs[:8], train=False, sym_embeddings=emb)
+    batch = collate([ds[i] for i in range(len(ds))])
+    p = val_pairs[3]
+    np.testing.assert_array_equal(batch["sym_emb"][3].numpy(), emb[f"{p.catid_cad}_{p.id_cad}"])
+    model = OCAMObjectOnly(ext_emb_size=128).cuda()
+    args = (batch["coords"].cuda(), batch["feats"].cuda(), batch["batch"].cuda(), batch["batch_size"])
+    with pytest.raises(ValueError):
+        model(*args)
+    out = model(*args, batch["sym_emb"].cuda())
+    assert out.shape == (8, 15)
+    out.abs().sum().backward()
+    assert all(q.grad is not None for q in model.parameters() if q.requires_grad)
+    model.eval()
+    with torch.no_grad():
+        a = model(*args, batch["sym_emb"].cuda())
+        b = model(*args, torch.zeros_like(batch["sym_emb"]).cuda())
+    assert not torch.allclose(a, b)
+    assert model.translation[0][0].in_features == 2 * 1024 + 128

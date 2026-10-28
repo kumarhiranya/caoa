@@ -12,9 +12,13 @@ With completion (P8), the per-pair completed points (`scripts/build_pose_complet
 in the same canonical frame; `caoa.data.pose_completion`) replace the instance points (`completion_mode="only"`,
 legacy `completion_points_only`) or are appended to them ("inst+comp"); at test time
 they are mapped back to the world frame first, so the normalisation covers them, as legacy.
+
+With `sym_embeddings` (P10a), each sample also carries the SEM embedding of its GT CAD (`sym_emb`), looked up
+by `catid_idcad` as legacy `S2CCompletionPoseV2` did (`sym_map[key][1]`).
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -40,10 +44,16 @@ class PoseDataConfig:
 COMPLETION_MODES = ("only", "inst+comp")
 
 
+def load_sym_embeddings(path: Path) -> dict[str, np.ndarray]:
+    """Legacy `data/s2c_symmetry/<model>/embeddings.npy`: {catid_idcad: (class probabilities, embedding)} -> embeddings."""
+    return {k: np.asarray(v[1], dtype=np.float32) for k, v in np.load(path, allow_pickle=True).item().items()}
+
+
 class ObjectPoseDataset(Dataset):
     def __init__(self, pairs: list[Pair], train: bool, cfg: PoseDataConfig = PoseDataConfig(),
-                 completions: dict | None = None, completion_mode: str | None = None):
-        """`completions`: {(scene_id, model_index): (N, 3) canonical-frame points}."""
+                 completions: dict | None = None, completion_mode: str | None = None, sym_embeddings: dict | None = None):
+        """`completions`: {(scene_id, model_index): (N, 3) canonical-frame points};
+        `sym_embeddings`: {catid_idcad: (E,) embedding} (see `load_sym_embeddings`)."""
         if (completions is None) != (completion_mode is None) or completion_mode not in (None, *COMPLETION_MODES):
             raise ValueError(f"completions and completion_mode {completion_mode!r} go together; modes: {COMPLETION_MODES}")
         self.pairs = pairs
@@ -51,6 +61,7 @@ class ObjectPoseDataset(Dataset):
         self.cfg = cfg
         self.completions = completions
         self.completion_mode = completion_mode
+        self.sym_embeddings = sym_embeddings
 
     def __len__(self):
         return len(self.pairs)
@@ -86,7 +97,7 @@ class ObjectPoseDataset(Dataset):
 
         points = sample_points(points, self.cfg.num_points).astype(np.float32)
         target = np.concatenate([target_t, target_R.reshape(9), target_s]).astype(np.float32)
-        return {
+        sample = {
             "coords": torch.from_numpy(points / self.cfg.voxel_size),
             "feats": torch.from_numpy(points),
             "target": torch.from_numpy(target),
@@ -94,10 +105,13 @@ class ObjectPoseDataset(Dataset):
             "norm_scale": norm_scale,
             "norm_offset": norm_offset,
         }
+        if self.sym_embeddings is not None:
+            sample["sym_emb"] = torch.from_numpy(self.sym_embeddings[f"{p.catid_cad}_{p.id_cad}"])
+        return sample
 
 
 def collate(samples: list[dict]) -> dict:
-    return {
+    out = {
         "coords": torch.cat([s["coords"] for s in samples]),
         "feats": torch.cat([s["feats"] for s in samples]),
         "batch": torch.cat([torch.full((len(s["coords"]),), b, dtype=torch.int32) for b, s in enumerate(samples)]),
@@ -107,4 +121,7 @@ def collate(samples: list[dict]) -> dict:
         "norm_scale": torch.tensor([s["norm_scale"] for s in samples], dtype=torch.float64),
         "norm_offset": torch.tensor(np.stack([s["norm_offset"] for s in samples])),
     }
+    if "sym_emb" in samples[0]:
+        out["sym_emb"] = torch.stack([s["sym_emb"] for s in samples])
+    return out
 

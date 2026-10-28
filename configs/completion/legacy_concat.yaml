@@ -1,0 +1,27 @@
+# Legacy CAPCM run ODGNet/experiments/UpTrans_comp/Concat_SN_S2CC/concat_snaug_s2cc_upTransb_comp
+# (Table 2 "Concat"; the completion model behind the paper's final numbers). Train data as legacy
+# (cfgs/dataset_configs/Concat_SNAug_S2CCompletion.yaml): SN-Indoor (hard, 1/20 drawn with replacement) + S2C-C.
+# Validation and test on the S2C-C val split (= test split), by user decision 2026-10-27. Legacy validated on
+# training data (the inner datasets' phase: train overrides others.subset); its [TEST] numbers used
+# test_S2CC_benchmark/config.yaml, i.e. S2C-C val, as here.
+name: legacy_concat
+seed: 2023
+num_workers: 8
+model: {NAME: UpTrans, num_pred: 8192, num_seeds: 1024, seed_fea: 128, dim_feat: 512, num_dicts: 512, upscales: [1, 2, 4], l2_loss: 0}
+dataset:
+  train:
+    NAME: ConcatDataset
+    datasets:
+      - {NAME: SNAugDataset, phase: train, num_points: 4096, difficulty: hard, add_noise_to_target: false, rotate_z: true,
+         data_downscale_factor: 20, filter_classes: false, add_dummy_feat: false}
+      - {NAME: S2CCompletion, phase: train, num_points: 4096, rotate_z: true, context_radius: 0.0}
+  val:  {NAME: S2CCompletion, phase: val, num_points: 4096, rotate_z: true, context_radius: 0.0}
+  test: {NAME: S2CCompletion, phase: val, num_points: 4096, rotate_z: true, context_radius: 0.0}
+total_bs: 32
+max_epoch: 400
+val_freq: 10  # legacy CLI default
+consider_metric: CDL1
+optimizer: {type: AdamW, kwargs: {lr: 0.0005, weight_decay: 0.0005}}
+scheduler: {type: LambdaLR, kwargs: {decay_step: 20, lr_decay: 0.8, lowest_decay: 0.01}}
+bnmscheduler: {type: Lambda, kwargs: {decay_step: 20, bn_decay: 0.5, bn_momentum: 0.9, lowest_decay: 0.01}}
+loss: {orth_weight: 1.0}

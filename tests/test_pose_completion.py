@@ -1,12 +1,15 @@
 """P8: completion inference for the pose pairs and its use in the pose dataset."""
 
+import dataclasses
+
 import numpy as np
 import pytest
 import torch
 
 from caoa.data.pairs import cache_dir, load_pairs
-from caoa.data.pose_completion import canonical_points, complete
+from caoa.data.pose_completion import canonical_points, complete, complete_pairs
 from caoa.data.pose_dataset import ObjectPoseDataset
+from caoa.geometry import yaw_matrix
 from caoa.paths import load_paths
 from tests import legacy_ref
 
@@ -70,3 +73,34 @@ def test_completion_arguments_go_together(pairs):
         ObjectPoseDataset(pairs, False, completions={})
     with pytest.raises(ValueError):
         ObjectPoseDataset(pairs, False, completions={}, completion_mode="instance")
+
+
+def _to_world(p, canonical):
+    return canonical.astype(np.float64) * p.box_extents.max() @ p.box_rotation.T + p.box_center
+
+
+@needs_cuda
+@needs_pairs
+def test_world_frame_completion_uses_no_gt_pose(pairs):
+    """`world` (the fix): changing the GT box leaves the completion, mapped back to the world as the
+    pose dataset does, unchanged. `legacy` keeps the original GT-box-frame inference."""
+    from caoa.models.odgnet import UpTrans
+
+    torch.manual_seed(0)
+    model = UpTrans().cuda().eval()
+    device = torch.device("cuda")
+    ps = pairs[:10]
+    moved = [dataclasses.replace(p, box_center=p.box_center + 1.0, box_rotation=p.box_rotation @ yaw_matrix(1.0),
+                                 box_extents=p.box_extents * 1.7) for p in ps]
+    np.random.seed(0)
+    a = complete_pairs(model, ps, device, "world")
+    np.random.seed(0)
+    b = complete_pairs(model, moved, device, "world")
+    for p, q, ca, cb in zip(ps, moved, a, b):
+        np.testing.assert_allclose(_to_world(p, ca), _to_world(q, cb), rtol=0, atol=1e-4)
+    np.random.seed(0)
+    legacy = complete_pairs(model, ps, device, "legacy")
+    np.random.seed(0)
+    ref = complete(model, [canonical_points(p) for p in ps], device)
+    for x, y in zip(legacy, ref):
+        np.testing.assert_array_equal(x, y)
