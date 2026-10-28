@@ -5,7 +5,7 @@ Clean re-implementation of *CAOA: Completion-Assisted Object-CAD Alignment*
 (`~/research/Github/vr_reconstruction`) only as a reference.
 
 Living document: update the status column and the phase sections as work lands.
-Last updated: 2026-10-27 (P7 and P8 legacy reproduction done on the DGX). The project moved to the DGX (the workstation GPU is shared). Data comes from the transfer bundle (`scripts/make_transfer_bundle.py`; see `CLAUDE.md`). The repo is https://github.com/kumarhiranya/caoa.
+Last updated: 2026-10-28 (P8 leak quantified and fixed; P9 port done, legacy SEM embeddings found degenerate and regenerated; P10a running). The project moved to the DGX (the workstation GPU is shared). Data comes from the transfer bundle (`scripts/make_transfer_bundle.py`; see `CLAUDE.md`). The repo is https://github.com/kumarhiranya/caoa.
 
 ## Ground rules
 
@@ -53,9 +53,9 @@ Last updated: 2026-10-27 (P7 and P8 legacy reproduction done on the DGX). The pr
 | P5 | Completion datasets: S2C-Completion (completion view), SN-Indoor | **Code done; caches built** (r = 0: 2.0 GB, r = 1 m: 2.8 GB; train 6,220 / val 1,744) | Parity with recovered legacy loaders |
 | P6 | CAPCM model: ODGNet port + legacy completion evaluation | **Done** ([results](results/P6.md)) | Op/metric parity; re-scored `ODG_*_S2CC.csv` |
 | P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), **on the DGX** | **Done** ([results](results/P7.md)): test CDL1 45.00 vs 46.80; accepted by the user 2026-10-27 | Val curve vs `results/legacy_curves/s2ccompletion_upTransb1_val.csv`; ckpt-best test CDL1 vs 46.80 |
-| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Legacy reproduction done** ([results](results/P8.md)): 87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3; leak-free mode next | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
-| P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | Planned | 95.8% accuracy; legacy embeddings reproduced |
-| P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | Planned | Ablation deltas under legacy + official evaluation |
+| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Legacy reproduction done; leak quantified and fixed** ([results](results/P8.md)): 87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3; leak-free completion-only 82.6–83.1 (−4), inst+comp 80.9–81.8 (≤ −1.3); emb 512 / 256 leak-free running | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
+| P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | **Port done** ([results](results/P9.md)); legacy `embeddings.npy` degenerate (wrong export inputs), regenerated (`cad_bbox`, user 2026-10-28); retraining open | 95.8% accuracy; legacy embeddings reproduced |
+| P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | **P10a running** (2026-10-28: SEM `cad_bbox` + concat completion-only, legacy and world completion frames); P10b–d planned | Ablation deltas under legacy + official evaluation |
 | P11 | Predicted instances: legacy SoftGroup evaluation, then the official pipeline | Planned | `sg_mnk_comp.csv`, `perclass_results.csv` |
 | P12 | Full-scale runs, Table 1 / Table 2 report, release | Planned | All rows reproduced or explained |
 
@@ -91,7 +91,7 @@ which phase reproduces it.
 | E8 | SoftGroup-prediction evaluation | `SGPredsS2CCompletionPoseVal` (`custom_datasets_pose.py:6236`) + `eval_pose_s2c_v2` | instance↔CAD overlap matching, "instance capture accuracy", per-class table grouped by **CAD taxonomy name** → `sg_mnk_comp.csv` | P11 | ❌ |
 | E9 | Completion evaluation | `ODGNet/utils/metrics.py` (`Metrics`: F-Score th=0.01, CD-L1, CD-L2 ×1e3); ODGNet `runner.validate()` (class-averaged) and `test()` (mixed averaging) | per-taxonomy CSV `Taxonomy,#Sample,F-Score,CDL1,CDL2,#ModelName` → `ODG_*_S2CC.csv`; `[TEST]` log lines | P6 | ❌ |
 | E10 | Completion inference timing | `S2CCompletionPoseV2.infer_completion_odg` (`time_inference`) | average inference time per sample | P8 | ❌ |
-| E11 | Symmetry evaluation | `training_utils.py:2307` `eval_sym` | argmax accuracy on string labels (`num2label`); returns gt / pred. The paper's F1 (94.1) has no code path. | P9 | ❌ |
+| E11 | Symmetry evaluation | `training_utils.py:2307` `eval_sym` | argmax accuracy on string labels (`num2label`); returns gt / pred. Its test loader drops the last partial batch (shuffled, batch 64: 95.8 = 552/576). The paper's F1 (94.1) is the training log's macro-F1 (94.05). | P9 | port done; legacy sample set open |
 
 Additions, not legacy, always labelled as such: the official Scan2CAD protocol
 (both conventions), matched-only Scan2CAD-formula accuracy, and the
@@ -120,7 +120,7 @@ are in the server copy (`mmlab-server-data/.../vr_reconstruction`).
 - `results/ODG_{PCN,SN55,SN34,S2CC,Concat,SNAug_epoch40}_S2CC.csv`: per taxonomy F-Score / CDL1 / CDL2.
 - `[TEST]` log lines behind Table 2: PCN 161.521 / 137.124; SN-55 94.103 / 78.029; SN-34 94.014 / 77.893; S2C-C 46.802 / 25.692. The "+Ctxt_100" 22.471 / 2.30 is a best-validation value.
 
-**Symmetry (E11):** 95.8% accuracy, 94.1 F1 (paper).
+**Symmetry (E11):** 95.8% accuracy, 94.1 F1 (paper) = the training log's final accuracy / macro-F1 (95.80 / 94.05); the checkpoint gives 94.8 / 90.6 on the 1,864 val pose pairs (P9).
 
 **Paper Table 1:** No-completion-Sph 60.92 / 48.63; CAPCM-Sph 75.83 / 67.45; CAPCM+SEM-SG 76.04 / 66.84; CAPCM+SEM-Sph 77.51 / 69.17; CAPCM+SEM-GT 86.54 / 78.15 (avg / class avg). Which legacy runs produced these rows is unknown; to establish in P3b / P8 / P11.
 
@@ -341,7 +341,7 @@ Code written and tested (not yet run at scale):
 ## P7 — CAPCM training (Table 2)
 
 - Recipe (paper): AdamW 5e-4; LambdaLR step 20, γ 0.8, min 5e-6; CD-L1 + orthogonality; 200 epochs; batch 32. ~1.5 days per run on full data.
-- **Scope (user, 2026-10-21): retrain S2C-C only**, to check that our training loop reproduces legacy (`s2ccompletion_upTransb1`: best epoch 180, test CDL1 46.80). The other rows are covered by the re-scored legacy checkpoints (P6). Runs after P8.
+- **Scope (user, 2026-10-21): retrain S2C-C only**, to check that our training loop reproduces legacy (`s2ccompletion_upTransb1`: best epoch 180, test CDL1 46.80). The other rows are covered by the re-scored legacy checkpoints (P6). Runs after P8. **Extended (user, 2026-10-27/28):** concat (SN-Indoor + S2C-C, `configs/completion/legacy_concat.yaml`, validated on the S2C-C val split instead of legacy's training data; started 2026-10-27 22:13, ~6.3 min/epoch on a shared node) and S2C-C + context 1 m (`legacy_s2cc_ctxt1.yaml`, queued after P10a).
 - Measured cost (after the Chamfer / k-NN / cudnn.benchmark speed-ups): 0.89 s per batch-32 step, about 19 GPU-hours for 401 epochs. For reference: concat about 38 h, SN-Indoor about 370 h (~15 days); legacy logged 0.83 s per step.
 - **Runs on the user's DGX** (2026-10-21). Runbook and targets are in `CLAUDE.md`; its data (r = 0 completion cache, 2.0 GB, and `semantic_embeddings.npy`, 46 MB; a `paths.yaml` entry) is on the DGX since 2026-10-24 (`docs/HANDOFF_DGX.md`). The legacy validation curve (39 points, epochs 10–390) is in `results/legacy_curves/s2ccompletion_upTransb1_val.csv`.
 - Batch 32 needs about 40 GB of GPU memory (legacy logged 39.99 GB). `train_completion.py` has no resume; the DGX's 7-day job limit makes it unnecessary.
@@ -386,6 +386,14 @@ Validation gate:
 
 **Then the fix (switch `completion_frame`):** `world`-frame completion, which uses no GT. Quantify the leak: the same OCAM evaluated with both completion frames.
 
+**Outcome of the leak analysis and fix (2026-10-27/28, [results](results/P8.md)).** Only the GT rotation reaches the
+CAPCM (centre and scale cancel in its normalisation), and the completed geometry barely depends on it, but completion-only
+OCAM reads the target rotation from the completion's frame-tied point layout: with the completion frame turned 180°,
+95% of its predictions turn 180° (accuracy 86.5 → 12.8), while inst+comp is unaffected. Retrained on `world`-frame
+completions (user-approved; caches `<name>__world`, 0.78 GiB each): completion-only 86.75 → 82.62 (S2C-C) / 83.05 (concat),
+inst+comp 81.49 → 80.85 / 83.10 → 81.81; official −center −2.2 to −2.7 for completion-only. Completion-only stays the best
+leak-free setup. emb 512 / 256 leak-free running.
+
 Validation gate:
 - Legacy targets within tolerance (full data), or the same ordering and gains on the subset.
 - Leak quantified.
@@ -405,9 +413,19 @@ Validation gate:
 - The legacy `symmetry_ptv3` checkpoint loads strictly and reproduces `data/s2c_symmetry/.../embeddings.npy` (cosine ≈ 1).
 - Retrained: 95.8% ± 1 accuracy; F1 definition settled; runtime vs 0.58 s/scene.
 
+**Status (2026-10-28, [results](results/P9.md)).** PTv3 vendored (`caoa/models/ptv3`, imports only; `torch.segment_reduce`
+for `torch_scatter`, flash-attn off) with the SEM head (`caoa/models/sem.py`). The checkpoint loads strictly and reproduces
+`embeddings.npy` (test cosine median 0.9997, same argmax for all 3,049 CADs). **But that file predicts every CAD as not
+symmetric:** the checkpoint was trained on `S2CCompletionSymmetry` (CAD in the GT box frame, `grid = coord // 1 cm`), and the
+file was exported two days later through `S2CSymmetry` (raw ShapeNet coordinates, min-subtracted grid). Fed as trained, the
+checkpoint gives 94.8% / macro-F1 90.6 on the val pose pairs (log 95.8 / 94.05; F1 = macro-F1). **Fix (user, 2026-10-28):**
+`scripts/build_sem_embeddings.py`, each CAD in its own bounding-box frame (no annotation): 94.1% per pose pair, 87% per
+unique CAD; switch `sym_embedding.frame: legacy_export | cad_bbox`. Open: retraining (recipe: legacy `train_sym_ptv3.py` on
+which pipeline, to decide), E11 on legacy's exact sample set, timing.
+
 ## P10 — OCAM paper model
 
-- **P10a.** Symmetry embedding concatenated (legacy `mnkpv3_emb`; no legacy run used it).
+- **P10a.** Symmetry embedding concatenated (legacy `mnkpv3_emb`; no legacy run used it). Code done 2026-10-28 (`OCAMObjectOnly(ext_emb_size=128)`, `sym_embedding` config). Runs (user: `cad_bbox` embeddings only): concat completion-only emb 1024, legacy and world completion frames (`semcad_*`).
 - **P10b.** Siamese CAD+object model with truly shared weights. The legacy `MinkowskiFCNNRelPose_v1` is not shared, and its CAD branch calls an object-branch layer: reproduce it as `legacy`, fix it as `paper`.
 - **P10c.** Loss.
   - Legacy: object vs itself under GT/pred pose; t2/q1/s2 or t3/q1/s3.
@@ -513,7 +531,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
   - Paper: Siamese CAD+object with shared weights, SEM input, Chamfer CAD-vs-object ×5, weights t2/r3/s2, AdamW wd 1e-4, 150 epochs.
   - Code: object-only `mnkpv3` (no checkpoint uses SEM), Chamfer off (or object-vs-itself), t2q1s2 / t3q1s3, wd 1e-3, 15k steps.
 - CAD choice: the paper retrieves with PointNet descriptors; the code uses the GT CAD.
-- SEM F1 (94.1): no code path computes it.
+- SEM F1 (94.1): no code path computes it; it is the training log's macro-F1 (94.05, P9).
 
 ## Switch register
 
@@ -525,7 +543,9 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | Training loop / validation schedule | legacy counter semantics, epoch overrun, validation every 1k | + labelled final evaluation of `model_final` | P3b |
 | Train data order | `shuffle=False` | shuffled | P3 ✅ (switch exists) |
 | Scene context | `v2` (scene minus instance) / `relpose_cache` (incl. instance, subsampled) | paper "enlarged by 100 cm" (ambiguous) | P4b |
-| Completion input frame | GT canonical (leaks GT pose) | world-oriented | P8 |
+| Completion input frame | GT canonical (leaks GT pose) | world-oriented | P8 ✅ (`completion_frame`) |
+| SEM embeddings for OCAM | legacy export (degenerate: all "not symmetric") | `cad_bbox` (CAD's own bbox, as trained) | P9 ✅ (`sym_embedding.frame`) |
+| Concat CAPCM validation data | training data (inner datasets' `phase: train`) | S2C-C val split (user, 2026-10-27) | P7 (config) |
 | Completion eval averaging | `validate()` class-avg / `test()` mixed | per-sample + class mean, separate | P6 |
 | CAPCM model selection | best on test | held-out validation | P7 |
 | SN-Indoor difficulty | crop-plane shift | 25/50/75% removed | P5 |
@@ -543,13 +563,14 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | Legacy scale error mean(\|ratio − 1\|) | Different pass set | Reproduced (E1) |
 | Translation threshold in normalised units | "20 cm" = 20% of object size | Reproduced; official in metres |
 | V2 and RelPose datasets share one cache file | Reported sample sets were built by RelPose's rule (1,864 / 6,671) | `relpose_cache` rule (P3b) |
-| GT-pose leak in GT-instance completion | Inflates 81.3 / 87.8 / 86.54 | Reproduced first, quantified (P8) |
+| GT-pose leak in GT-instance completion | Inflates 81.3 / 87.8 / 86.54; completion-only OCAM reads the rotation from the completion's point layout (~4 points) | Reproduced, quantified, fixed (`world`, P8) |
+| SEM `embeddings.npy` exported through a different input pipeline than the checkpoint was trained on | Every CAD predicted not symmetric; embeddings carry no symmetry | Regenerated (`cad_bbox`, P9) |
 | `filter_classes: False` → category −1 for every sample | Labels unusable; per-class uses names | Names used, as legacy |
 | Legacy loop overruns `max_steps` to the epoch end (cosine LR rising again after `T_max`); the step-15,000 validation is computed but never written to `m_train_log.json` | Logged "final" numbers are the step-14,000 values | Loop reproduced (P3b); all validations logged |
 | Result CSVs: producing checkpoints unknown; `mnk_comp.csv` and `sg_mnk_inst.csv` are copies of `comp.csv` | Targets are patterns, not exact | Noted per target |
 | Table 1 grouping not in code; avg 86.54 ≠ k/1,864; class avg ≠ mean of the shown columns | Table 1 provenance unclear | P3b.5 hypothesis + validation |
 | Table 1 baseline rows shifted (display dropped) | Misleading comparison | Report from the original papers |
-| SEM F1 (94.1) has no code path | Definition unknown | Settle in P9 |
+| SEM F1 (94.1) has no code path | Definition unknown | Settled: training-log macro-F1 (P9) |
 | ODGNet S2C loader: 10-from-9 unpack at line 466 (crash); unfinished context branch | Can't run as-is | Fixes reviewed with the user (P5a) |
 | ODGNet best-on-test, mixed averaging, "+Ctxt" row from an S2C-C-only run | Table 2 provenance | Reproduce as run (P6/P7) |
 | Concat / SN-Indoor `ckpt-last` overwritten after their Mar 5 tests; SN-55 checkpoint missing | Those Table 2 / log rows can't be re-scored | Retrain in P7 |
@@ -567,6 +588,8 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | CAD point cache | 0.3–0.6 GB | P4a, to approve |
 | Context (if stored) | est. 1–3 GB | P4b, to approve |
 | Completed-points caches | ~0.8 GB per model (8,527 pairs × 8,192 float32 points) | P8, done |
+| World-frame completed-points caches (`__world`, S2C-C + concat) | 2 × 0.78 GiB, on the DGX lab share | P8 fix, done (user OK 2026-10-27) |
+| SEM `cad_bbox` embeddings | 1.9 MB | P9 fix, done |
 | DGX transfer bundle (`/home/data/caoa_dgx_bundle`) | symlinks + 0.5 GB copied from the drive; 7.8 GB (`now/`) + 29.6 GB (`later/`) | done; sent 2026-10-24 without ScanNet/ShapeNet (already on the DGX, MD5-identical): 15.2 GB on the DGX's lab storage (`docs/HANDOFF_DGX.md`) |
 | SN-Indoor local cache (optional) | unknown, measure first | P5c, to approve |
 | ScanNet val scenes (P4d-val) | ~3 GB | done |

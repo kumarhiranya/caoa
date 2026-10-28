@@ -33,7 +33,7 @@ Read these before working:
 8. **Process:** every phase ends with a validation gate. Write a results note in `docs/results/`, update
    PLAN.md, and commit after the phase passes (WIP commits are OK). Don't commit `cache/` or `outputs/`.
 
-## Status (2026-10-27)
+## Status (2026-10-28)
 
 - **Done:** P0–P3b (data layer, legacy and official metrics, OCAM on spconv, legacy evaluation parity),
   P6 (UpTrans port; re-scored legacy checkpoints within 0.07%). P4/P5: code done and caches built.
@@ -42,8 +42,12 @@ Read these before working:
 - **P7 done** (2026-10-27, `docs/results/P7.md`): S2C-C retrained, test CDL1 45.00 vs legacy 46.80; accepted by the user.
 - **P8 legacy reproduction done** (2026-10-27, `docs/results/P8.md`): all six runs; the S2C-C runs match the `pose_mnk`
   logs (87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3). Next in P8: the leak-free `world`-frame completion
-  (a fix: discuss with the user first). The runbooks below are kept for reference.
-- P9–P12 are planned. Their data is on the DGX too (SEM checkpoints, SoftGroup val predictions, ScanNet, CADs).
+  (done 2026-10-28, below). The runbooks below are kept for reference.
+- **P8 leak fixed** (2026-10-28, `docs/results/P8.md`): completion-only OCAM read the GT rotation from the completion's point
+  layout; leak-free (`completion_frame: world`) 82.6–83.1 vs 86.75 leaky; inst+comp barely affected.
+- **P9 port done** (`docs/results/P9.md`): PTv3 vendored in `caoa/models/ptv3`. The legacy SEM `embeddings.npy` is degenerate
+  (exported with the wrong inputs); regenerated as `cad_bbox` (user). **P10a** (SEM + OCAM) running; extra CAPCM runs
+  (concat, S2C-C + context) on the DGX by user request. P10b–P12 planned.
 - If anything is still committed from the workstation, `git pull --rebase` before pushing.
 
 ## Data on the DGX
