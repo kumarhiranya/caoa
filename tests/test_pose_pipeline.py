@@ -108,12 +108,15 @@ needs_sym = pytest.mark.skipif(not SYM_PATH.exists(), reason="legacy SEM embeddi
 
 
 @needs_pairs
-@needs_sym
-def test_sym_embeddings_cover_every_pair():
+@pytest.mark.parametrize("frame", ["legacy_export", "cad_bbox"])
+def test_sym_embeddings_cover_every_pair(frame):
     """P10a: legacy looks up `sym_map[catid_idcad][1]` for every pose pair, so every CAD needs an embedding."""
-    from caoa.data.pose_dataset import load_sym_embeddings
+    from caoa.data.pose_dataset import load_sym_embeddings, sem_embedding_path
 
-    emb = load_sym_embeddings(SYM_PATH)
+    path = sem_embedding_path(PATHS, SYM_MODEL, frame)
+    if not path.exists():
+        pytest.skip(f"{path} missing (scripts/build_sem_embeddings.py)")
+    emb = load_sym_embeddings(path)
     assert {e.shape for e in emb.values()} == {(128,)}
     pairs = load_pairs(PATHS.cache, class_rule="relpose_cache")
     assert all(f"{p.catid_cad}_{p.id_cad}" in emb for p in pairs)

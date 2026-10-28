@@ -1,11 +1,12 @@
 # P10a: legacy "mnkpv3_emb" (OCAM + the SEM symmetry embedding of the GT CAD, concatenated after pooling; no legacy run
-# used it). Otherwise as world_comp_concat_only_emb1024.yaml. Embeddings: legacy data/s2c_symmetry/<sym_embedding>/embeddings.npy.
-name: sem_world_comp_concat_only_emb1024
+# used it). Otherwise as world_comp_concat_only_emb1024.yaml. Embeddings: the fix `cad_bbox` (user, 2026-10-28;
+# scripts/build_sem_embeddings.py), not the legacy export, which predicts every CAD as not symmetric (docs/results/P9.md).
+name: semcad_world_comp_concat_only_emb1024
 seed: 777
 
 model:
   embedding: 1024
-  sym_embedding: S2Csym_emb128_bce_vox1cm_wd1e-03_b64_lr1e-04_bbcls-ptv3-v1m1-0-shapenet_v2_mini_ptv3cls_softmax_symbinary_cad_bce_adam_cosineannealing  # legacy symmetry_model_name
+  sym_embedding: {name: S2Csym_emb128_bce_vox1cm_wd1e-03_b64_lr1e-04_bbcls-ptv3-v1m1-0-shapenet_v2_mini_ptv3cls_softmax_symbinary_cad_bce_adam_cosineannealing, frame: cad_bbox}
 
 data:
   class_rule: relpose_cache  # the rule that built the reported legacy datasets (1,864 test samples)

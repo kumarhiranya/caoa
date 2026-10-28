@@ -44,6 +44,20 @@ class PoseDataConfig:
 COMPLETION_MODES = ("only", "inst+comp")
 
 
+SEM_FRAMES = ("legacy_export", "cad_bbox")
+
+
+def sem_embedding_path(paths, run: str, frame: str = "legacy_export") -> Path:
+    """`legacy_export`: the legacy `data/s2c_symmetry/<run>/embeddings.npy` (exported with inputs the checkpoint was
+    not trained on: every CAD predicted not symmetric, docs/results/P9.md). `cad_bbox` (the fix,
+    `scripts/build_sem_embeddings.py`): the CAD in its own bounding-box frame, as the checkpoint was trained."""
+    if frame == "legacy_export":
+        return Path(paths.legacy_repo) / "data/s2c_symmetry" / run / "embeddings.npy"
+    if frame == "cad_bbox":
+        return Path(paths.cache) / "sem_embeddings_v1" / f"{run}__{frame}" / "embeddings.npy"
+    raise ValueError(f"SEM embedding frame {frame!r}; one of {SEM_FRAMES}")
+
+
 def load_sym_embeddings(path: Path) -> dict[str, np.ndarray]:
     """Legacy `data/s2c_symmetry/<model>/embeddings.npy`: {catid_idcad: (class probabilities, embedding)} -> embeddings."""
     return {k: np.asarray(v[1], dtype=np.float32) for k, v in np.load(path, allow_pickle=True).item().items()}

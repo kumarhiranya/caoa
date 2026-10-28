@@ -30,7 +30,7 @@ from caoa.data import scan2cad
 from caoa.data.labels import scannet_split
 from caoa.data.pairs import cache_dir, load_pairs
 from caoa.data.pose_completion import load_pose_completions
-from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate, load_sym_embeddings
+from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate, load_sym_embeddings, sem_embedding_path
 from caoa.eval import groupings, pose_eval
 from caoa.models.ocam import OCAMObjectOnly
 from caoa.paths import REPO_ROOT, load_paths
@@ -112,9 +112,9 @@ def main():
     completion = data.pop("completion", None)  # {name: <pose completion cache>, mode: only | inst+comp, frame: legacy | world}
     completions = load_pose_completions(paths.cache, completion["name"], completion.get("frame", "legacy")) if completion else None
     completion_mode = completion["mode"] if completion else None
-    # P10a: SEM symmetry embedding of the GT CAD (legacy `symmetry_model_name`, data/s2c_symmetry/<name>/embeddings.npy)
-    sym_model = cfg["model"].get("sym_embedding")
-    sym_embeddings = load_sym_embeddings(paths.legacy_repo / "data/s2c_symmetry" / sym_model / "embeddings.npy") if sym_model else None
+    # P10a: SEM symmetry embedding of the GT CAD; sym_embedding: {name: <legacy symmetry_model_name>, frame: legacy_export | cad_bbox}
+    sym = cfg["model"].get("sym_embedding")
+    sym_embeddings = load_sym_embeddings(sem_embedding_path(paths, sym["name"], sym.get("frame", "legacy_export"))) if sym else None
     train_pairs = load_pairs(paths.cache, "train", class_rule=class_rule)
     val_pairs = load_pairs(paths.cache, "val", class_rule=class_rule)
     data_cfg = PoseDataConfig(**{k: tuple(v) if isinstance(v, list) else v for k, v in data.items()})

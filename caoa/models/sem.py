@@ -7,8 +7,12 @@
   (`segment_csr`), then MLP 128-256-128-2 with BN, ReLU, dropout 0.5 and a softmax. The model outputs
   probabilities in train and eval mode (legacy trains it with `BCELoss` on them). `emb` is the pooled 128-d
   feature, the SEM embedding that OCAM consumes (`data/s2c_symmetry/<run>/embeddings.npy`).
-* Input (legacy `S2CSymmetry.__getitem__` + `point_collate_fn`): raw ShapeNet coordinates as `coord` and `feat`,
-  `grid_coord = (coord - coord.min(0)) // voxel_size` per cloud, clouds concatenated with CSR `offset`.
+* Input: `coord` = `feat` = the points, clouds concatenated with CSR `offset`. Two legacy pipelines differ:
+  - "train" (`S2CCompletionSymmetry`, data_source cad, which trained the checkpoint): the CAD (5,000 uniform
+    points, tiled to 8,192) in its GT box frame (longest side 1), `grid_coord = coord // voxel_size`;
+  - "export" (`S2CSymmetry`, which `build_dataset_sym.py` used for `embeddings.npy`): raw ShapeNet
+    coordinates, `grid_coord = (coord - coord.min(0)) // voxel_size`. The checkpoint collapses on these inputs
+    (every CAD predicted not symmetric; docs/results/P9.md).
 """
 
 import numpy as np
@@ -78,15 +82,23 @@ class SEMClassifier(nn.Module):
         return {"probs": self.cls_head(emb), "emb": emb}
 
 
-def make_batch(clouds: list[np.ndarray], device, voxel_size: float = VOXEL_SIZE) -> dict:
-    """Legacy `S2CSymmetry.__getitem__` (minus its random point shuffle) + `point_collate_fn`."""
-    grid = [torch.div(c - c.min(0)[0], voxel_size, rounding_mode="floor").long()  # float64, as legacy (numpy input)
-            for c in (torch.as_tensor(np.asarray(c, dtype=np.float64)) for c in clouds)]
+GRID_MODES = ("train", "export")
+
+
+def make_batch(clouds: list[np.ndarray], device, voxel_size: float = VOXEL_SIZE, grid: str = "export") -> dict:
+    """Legacy `__getitem__` (minus its random point shuffle) + `point_collate_fn`; `grid` picks the pipeline (above)."""
+    if grid not in GRID_MODES:
+        raise ValueError(f"grid {grid!r}; one of {GRID_MODES}")
+    if grid == "export":  # float64, as legacy (numpy input)
+        grids = [torch.div(c - c.min(0)[0], voxel_size, rounding_mode="floor").long()
+                 for c in (torch.as_tensor(np.asarray(c, dtype=np.float64)) for c in clouds)]
+    else:  # float32 tensor, as legacy
+        grids = [torch.div(torch.as_tensor(c, dtype=torch.float32), voxel_size, rounding_mode="floor").long() for c in clouds]
     coord = torch.cat([torch.as_tensor(c, dtype=torch.float32) for c in clouds]).to(device)
     return {
         "coord": coord,
         "feat": coord.clone(),
-        "grid_coord": torch.cat(grid).to(device),
+        "grid_coord": torch.cat(grids).to(device),
         "offset": torch.as_tensor(np.cumsum([len(c) for c in clouds]), device=device),
     }
 
