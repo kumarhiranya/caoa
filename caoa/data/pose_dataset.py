@@ -15,6 +15,12 @@ they are mapped back to the world frame first, so the normalisation covers them,
 
 With `sym_embeddings` (P10a), each sample also carries the SEM embedding of its GT CAD (`sym_emb`), looked up
 by `catid_idcad` as legacy `S2CCompletionPoseV2` did (`sym_map[key][1]`).
+
+With `cad_points` (P10b, Siamese), each sample also carries its GT CAD (user decisions 2026-10-28): the CAD's surface
+points in the CAD's own bounding-box frame (centred, longest side 1; no annotation, not augmented) as the CAD branch
+input (`cad_coords` / `cad_feats`), and `CHAMFER_POINTS` of them in unit-box coordinates (`cad_unit`, the CAD's
+bounding box mapped to [-0.5, 0.5]^3) for the Chamfer loss: a box pose (t, R, s) places them at R (s * u) + t, the
+same box OCAM predicts, so the loss compares the CAD at the predicted and at the GT pose.
 """
 
 from dataclasses import dataclass
@@ -42,6 +48,7 @@ class PoseDataConfig:
 
 
 COMPLETION_MODES = ("only", "inst+comp")
+CHAMFER_POINTS = 2048
 
 
 SEM_FRAMES = ("legacy_export", "cad_bbox")
@@ -58,6 +65,19 @@ def sem_embedding_path(paths, run: str, frame: str = "legacy_export") -> Path:
     raise ValueError(f"SEM embedding frame {frame!r}; one of {SEM_FRAMES}")
 
 
+CAD_POINTS_VERSION = "cad_points_v1"
+
+
+def cad_points_path(cache_root) -> Path:
+    return Path(cache_root) / CAD_POINTS_VERSION / "cad_bbox_8192.npz"
+
+
+def load_cad_points(cache_root) -> dict[str, np.ndarray]:
+    """{catid_idcad: (8192, 3) float32} from `scripts/build_cad_points.py`."""
+    with np.load(cad_points_path(cache_root)) as z:
+        return {k: z[k] for k in z.files}
+
+
 def load_sym_embeddings(path: Path) -> dict[str, np.ndarray]:
     """Legacy `data/s2c_symmetry/<model>/embeddings.npy`: {catid_idcad: (class probabilities, embedding)} -> embeddings."""
     return {k: np.asarray(v[1], dtype=np.float32) for k, v in np.load(path, allow_pickle=True).item().items()}
@@ -65,9 +85,11 @@ def load_sym_embeddings(path: Path) -> dict[str, np.ndarray]:
 
 class ObjectPoseDataset(Dataset):
     def __init__(self, pairs: list[Pair], train: bool, cfg: PoseDataConfig = PoseDataConfig(),
-                 completions: dict | None = None, completion_mode: str | None = None, sym_embeddings: dict | None = None):
+                 completions: dict | None = None, completion_mode: str | None = None, sym_embeddings: dict | None = None,
+                 cad_points: dict | None = None):
         """`completions`: {(scene_id, model_index): (N, 3) canonical-frame points};
-        `sym_embeddings`: {catid_idcad: (E,) embedding} (see `load_sym_embeddings`)."""
+        `sym_embeddings`: {catid_idcad: (E,) embedding} (see `load_sym_embeddings`);
+        `cad_points`: {catid_idcad: (M, 3) CAD surface points in the CAD's bounding-box frame} (`load_cad_points`)."""
         if (completions is None) != (completion_mode is None) or completion_mode not in (None, *COMPLETION_MODES):
             raise ValueError(f"completions and completion_mode {completion_mode!r} go together; modes: {COMPLETION_MODES}")
         self.pairs = pairs
@@ -76,6 +98,7 @@ class ObjectPoseDataset(Dataset):
         self.completions = completions
         self.completion_mode = completion_mode
         self.sym_embeddings = sym_embeddings
+        self.cad_points = cad_points
 
     def __len__(self):
         return len(self.pairs)
@@ -121,6 +144,14 @@ class ObjectPoseDataset(Dataset):
         }
         if self.sym_embeddings is not None:
             sample["sym_emb"] = torch.from_numpy(self.sym_embeddings[f"{p.catid_cad}_{p.id_cad}"])
+        if self.cad_points is not None:
+            cad = self.cad_points[f"{p.catid_cad}_{p.id_cad}"]
+            cad_in = sample_points(cad, self.cfg.num_points).astype(np.float32)
+            extent = np.maximum(cad.max(0) - cad.min(0), 1e-3)  # bounding box is centred: unit coordinates = cad / extent
+            unit = cad[np.random.choice(len(cad), CHAMFER_POINTS, replace=len(cad) < CHAMFER_POINTS)] / extent
+            sample["cad_coords"] = torch.from_numpy(cad_in / self.cfg.voxel_size)
+            sample["cad_feats"] = torch.from_numpy(cad_in)
+            sample["cad_unit"] = torch.from_numpy(unit.astype(np.float32))
         return sample
 
 
@@ -137,5 +168,10 @@ def collate(samples: list[dict]) -> dict:
     }
     if "sym_emb" in samples[0]:
         out["sym_emb"] = torch.stack([s["sym_emb"] for s in samples])
+    if "cad_coords" in samples[0]:
+        out["cad_coords"] = torch.cat([s["cad_coords"] for s in samples])
+        out["cad_feats"] = torch.cat([s["cad_feats"] for s in samples])
+        out["cad_batch"] = torch.cat([torch.full((len(s["cad_coords"]),), b, dtype=torch.int32) for b, s in enumerate(samples)])
+        out["cad_unit"] = torch.stack([s["cad_unit"] for s in samples])
     return out
 

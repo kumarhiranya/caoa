@@ -149,3 +149,61 @@ def test_model_with_sym_embedding(val_pairs):
         b = model(*args, torch.zeros_like(batch["sym_emb"]).cuda())
     assert not torch.allclose(a, b)
     assert model.translation[0][0].in_features == 2 * 1024 + 128
+
+
+def _fake_cad_points(pairs, n=4096, seed=0):
+    """CAD stand-ins: points filling each pair's box, in the CAD bounding-box frame (centred, longest side 1)."""
+    rng = np.random.default_rng(seed)
+    out = {}
+    for p in pairs:
+        ext = p.box_extents / p.box_extents.max()
+        pts = rng.uniform(-0.5, 0.5, (n, 3)) * ext
+        pts[:8] = np.array([[x, y, z] for x in (-.5, .5) for y in (-.5, .5) for z in (-.5, .5)]) * ext  # exact bbox
+        out[f"{p.catid_cad}_{p.id_cad}"] = pts.astype(np.float32)
+    return out
+
+
+@needs_pairs
+def test_chamfer_box_points_follow_the_target(val_pairs):
+    """P10c: unit-box CAD points placed by the GT box pose give the GT box (test frame: metres x norm_scale - offset),
+    and the Chamfer pose loss is zero at the GT pose and grows with a pose error."""
+    from caoa.models.pose_losses import box_points, chamfer_pose_loss
+
+    pairs = val_pairs[:6]
+    ds = ObjectPoseDataset(pairs, train=False, cad_points=_fake_cad_points(pairs))
+    batch = collate([ds[i] for i in range(len(ds))])
+    corners = torch.tensor([[x, y, z] for x in (-.5, .5) for y in (-.5, .5) for z in (-.5, .5)], dtype=torch.float32)
+    got = box_points(batch["target"].double(), corners[None].expand(len(pairs), -1, -1).double())
+    for i, p in enumerate(pairs):
+        world = p.box_center + (corners.numpy() * p.box_extents) @ p.box_rotation.T
+        want = world * batch["norm_scale"][i].item() - batch["norm_offset"][i].numpy()
+        np.testing.assert_allclose(got[i].numpy(), want, atol=1e-5)
+    unit = batch["cad_unit"]
+    assert unit.abs().max() <= 0.5 + 1e-5
+    assert chamfer_pose_loss(batch["target"], batch["target"], unit).item() == pytest.approx(0, abs=1e-10)
+    off = batch["target"].clone()
+    off[:, :3] += 0.05
+    assert chamfer_pose_loss(off, batch["target"], unit).item() > 1e-3
+
+
+@needs_cuda
+@needs_pairs
+@pytest.mark.parametrize("shared", [True, False])
+def test_siamese_forward_backward(val_pairs, shared):
+    """P10b: shared = one trunk (paper); unshared = two trunks, each with its own conv4 (legacy RelPose, bug fixed)."""
+    from caoa.models.ocam import OCAMSiamese
+
+    pairs = val_pairs[:4]
+    ds = ObjectPoseDataset(pairs, train=True, cad_points=_fake_cad_points(pairs))
+    batch = collate([ds[i] for i in range(len(ds))])
+    model = OCAMSiamese(shared=shared).cuda()
+    assert (model.cad is model.obj) == shared
+    obj = [batch[k].cuda() for k in ("coords", "feats", "batch")]
+    cad = [batch[k].cuda() for k in ("cad_coords", "cad_feats", "cad_batch")]
+    out = model(*obj, batch["batch_size"], *cad)
+    assert out.shape == (4, 15)
+    out.abs().sum().backward()
+    assert all(p.grad is not None for p in model.parameters())
+    if not shared:
+        for trunk in (model.obj, model.cad):
+            assert next(trunk.conv4.parameters()).grad.abs().sum() > 0

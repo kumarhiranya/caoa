@@ -30,16 +30,17 @@ from caoa.data import scan2cad
 from caoa.data.labels import scannet_split
 from caoa.data.pairs import cache_dir, load_pairs
 from caoa.data.pose_completion import load_pose_completions
-from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate, load_sym_embeddings, sem_embedding_path
+from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate, load_cad_points, load_sym_embeddings, sem_embedding_path
 from caoa.eval import groupings, pose_eval
-from caoa.models.ocam import OCAMObjectOnly
+from caoa.models.ocam import OCAMObjectOnly, OCAMSiamese
+from caoa.models.pose_losses import chamfer_pose_loss
 from caoa.paths import REPO_ROOT, load_paths
 
 
 def make_loader(pairs, train: bool, cfg: dict, data_cfg: PoseDataConfig, shuffle: bool, completions=None, completion_mode=None,
-                sym_embeddings=None):
+                sym_embeddings=None, cad_points=None):
     return DataLoader(
-        ObjectPoseDataset(pairs, train, data_cfg, completions, completion_mode, sym_embeddings),
+        ObjectPoseDataset(pairs, train, data_cfg, completions, completion_mode, sym_embeddings, cad_points),
         batch_size=cfg["train"]["batch_size"],
         shuffle=shuffle,
         num_workers=cfg["train"]["num_workers"],
@@ -50,7 +51,10 @@ def make_loader(pairs, train: bool, cfg: dict, data_cfg: PoseDataConfig, shuffle
 
 def model_inputs(batch, device):
     ext = batch["sym_emb"].to(device) if "sym_emb" in batch else None  # legacy "mnkpv3_emb" (P10a)
-    return batch["coords"].to(device), batch["feats"].to(device), batch["batch"].to(device), batch["batch_size"], ext
+    obj = (batch["coords"].to(device), batch["feats"].to(device), batch["batch"].to(device), batch["batch_size"])
+    if "cad_coords" in batch:  # Siamese (P10b)
+        return *obj, batch["cad_coords"].to(device), batch["cad_feats"].to(device), batch["cad_batch"].to(device), ext
+    return *obj, ext
 
 
 def forward(model, batch, device):
@@ -112,6 +116,9 @@ def main():
     completion = data.pop("completion", None)  # {name: <pose completion cache>, mode: only | inst+comp, frame: legacy | world}
     completions = load_pose_completions(paths.cache, completion["name"], completion.get("frame", "legacy")) if completion else None
     completion_mode = completion["mode"] if completion else None
+    # P10b: Siamese OCAM, CAD points in the CAD's bounding-box frame (scripts/build_cad_points.py)
+    siamese = cfg["model"].get("siamese")  # {shared: true (paper) | false (legacy RelPose layout, conv4 fixed)}
+    cad_points = load_cad_points(paths.cache) if siamese else None
     # P10a: SEM symmetry embedding of the GT CAD; sym_embedding: {name: <legacy symmetry_model_name>, frame: legacy_export | cad_bbox}
     sym = cfg["model"].get("sym_embedding")
     sym_embeddings = load_sym_embeddings(sem_embedding_path(paths, sym["name"], sym.get("frame", "legacy_export"))) if sym else None
@@ -119,14 +126,17 @@ def main():
     val_pairs = load_pairs(paths.cache, "val", class_rule=class_rule)
     data_cfg = PoseDataConfig(**{k: tuple(v) if isinstance(v, list) else v for k, v in data.items()})
     train_loader = make_loader(train_pairs, True, cfg, data_cfg, shuffle=tcfg["shuffle"], completions=completions, completion_mode=completion_mode,
-                               sym_embeddings=sym_embeddings)
+                               sym_embeddings=sym_embeddings, cad_points=cad_points)
     val_loader = make_loader(val_pairs, False, cfg, data_cfg, shuffle=False, completions=completions, completion_mode=completion_mode,
-                             sym_embeddings=sym_embeddings)
+                             sym_embeddings=sym_embeddings, cad_points=cad_points)
     print(f"class rule {class_rule}: train pairs {len(train_pairs)}, val pairs {len(val_pairs)}"
           + (f"; completion {completion['name']} ({completion_mode}, frame {completion.get('frame', 'legacy')})" if completion else ""))
 
     ext_emb_size = len(next(iter(sym_embeddings.values()))) if sym_embeddings else 0
-    model = OCAMObjectOnly(embedding=cfg["model"]["embedding"], ext_emb_size=ext_emb_size).to(device)
+    if siamese:
+        model = OCAMSiamese(embedding=cfg["model"]["embedding"], ext_emb_size=ext_emb_size, shared=siamese["shared"]).to(device)
+    else:
+        model = OCAMObjectOnly(embedding=cfg["model"]["embedding"], ext_emb_size=ext_emb_size).to(device)
     if args.eval_only:
         model.load_state_dict(torch.load(args.eval_only, map_location=device)["model"])
     else:
@@ -147,7 +157,8 @@ def train(model, train_loader, val_loader, val_pairs, tcfg, out_dir, device):
     w = tcfg["loss_weights"]
     l1 = torch.nn.L1Loss(reduction="sum")
     writer = SummaryWriter(out_dir)
-    log = {k: [] for k in ("loss", "loss_pose", "loss_t", "loss_q", "loss_s", "iter_loss", "epochs",
+    chamfer_weight = tcfg.get("chamfer_weight", 0.0)  # P10c
+    log = {k: [] for k in ("loss", "loss_pose", "loss_t", "loss_q", "loss_s", "loss_chamfer", "iter_loss", "epochs",
                            "inst_pose_mae", "iter_acc", "s2c_t", "s2c_q", "s2c_s", "s2c_total")}
 
     i, epoch, start = 0, 0, time.time()
@@ -160,7 +171,9 @@ def train(model, train_loader, val_loader, val_pairs, tcfg, out_dir, device):
             loss_t = l1(pred[:, :3], target[:, :3]) / n
             loss_q = l1(pred[:, 3:12], target[:, 3:12]) / n
             loss_s = l1(pred[:, 12:], target[:, 12:]) / n
-            loss = w["t"] * loss_t + w["r"] * loss_q + w["s"] * loss_s
+            loss_pose = w["t"] * loss_t + w["r"] * loss_q + w["s"] * loss_s
+            loss_cd = chamfer_pose_loss(pred, target, batch["cad_unit"].to(device)) if chamfer_weight else torch.zeros((), device=device)
+            loss = loss_pose + chamfer_weight * loss_cd
 
             optimizer.zero_grad()
             loss.backward()
@@ -168,14 +181,14 @@ def train(model, train_loader, val_loader, val_pairs, tcfg, out_dir, device):
             scheduler.step()
 
             if i % tcfg["stat_freq"] == 0 and i > 0:
-                values = {"loss": loss, "loss_pose": loss, "loss_t": loss_t, "loss_q": loss_q, "loss_s": loss_s}
+                values = {"loss": loss, "loss_pose": loss_pose, "loss_t": loss_t, "loss_q": loss_q, "loss_s": loss_s, "loss_chamfer": loss_cd}
                 for k, v in values.items():
                     log[k].append(v.item())
                 log["iter_loss"].append(i)
                 log["epochs"].append(epoch)
                 rate = (i + 1) / (time.time() - start)
-                print(f"Iter: {i}, Loss: {loss.item():.4f}, t:{loss_t.item():.4f}, q:{loss_q.item():.4f}, s:{loss_s.item():.4f}  ({rate:.1f} it/s)", flush=True)
-                for k in ("loss", "loss_t", "loss_q", "loss_s"):
+                print(f"Iter: {i}, Loss: {loss.item():.4f}, t:{loss_t.item():.4f}, q:{loss_q.item():.4f}, s:{loss_s.item():.4f}, chamfer: {loss_cd.item():.4f}  ({rate:.1f} it/s)", flush=True)
+                for k in ("loss", "loss_t", "loss_q", "loss_s") + (("loss_chamfer",) if chamfer_weight else ()):
                     writer.add_scalar(f"loss/{k.removeprefix('loss_') if k != 'loss' else 'pose'}", log[k][-1], i)
                 writer.add_scalar("train/lr", scheduler.get_last_lr()[0], i)
                 (out_dir / "train_log.json").write_text(json.dumps(log))
