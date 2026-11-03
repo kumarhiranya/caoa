@@ -33,7 +33,7 @@ Read these before working:
 8. **Process:** every phase ends with a validation gate. Write a results note in `docs/results/`, update
    PLAN.md, and commit after the phase passes (WIP commits are OK). Don't commit `cache/` or `outputs/`.
 
-## Status (2026-10-28)
+## Status (2026-11-03)
 
 - **Done:** P0–P3b (data layer, legacy and official metrics, OCAM on spconv, legacy evaluation parity),
   P6 (UpTrans port; re-scored legacy checkpoints within 0.07%). P4/P5: code done and caches built.
@@ -46,8 +46,14 @@ Read these before working:
 - **P8 leak fixed** (2026-10-28, `docs/results/P8.md`): completion-only OCAM read the GT rotation from the completion's point
   layout; leak-free (`completion_frame: world`) 82.6–83.1 vs 86.75 leaky; inst+comp barely affected.
 - **P9 port done** (`docs/results/P9.md`): PTv3 vendored in `caoa/models/ptv3`. The legacy SEM `embeddings.npy` is degenerate
-  (exported with the wrong inputs); regenerated as `cad_bbox` (user). **P10a** (SEM + OCAM) running; extra CAPCM runs
-  (concat, S2C-C + context) on the DGX by user request. P10b–P12 planned.
+  (exported with the wrong inputs); regenerated as `cad_bbox` (user). P10a/b done (below); extra CAPCM runs
+  (concat, S2C-C + context) done on the DGX by user request. P10c–P12: below and PLAN.md.
+- **Evaluation (user, 2026-10-29):** S2C-C annotations only; objects we don't evaluate on never count as failures. The
+  official all-GT protocol (`benchmark/*`) is no longer reported; the addition to the legacy metric is `s2c_criteria/*`
+  (Scan2CAD's per-object criteria on the evaluated S2C-C objects). CAD retrieval (lost legacy module; 3D-Match or similar)
+  is framework completion only; evaluations use the GT CAD.
+- **P7 extension done** (concat 44.42 vs 45.37; context 22.18 vs 22.47). **P10a/b done** (`docs/results/P10.md`): Siamese
+  with separate trunks is the best leak-free OCAM; P10c (+ Chamfer loss) running on DGX job 134281 (dgx05).
 - If anything is still committed from the workstation, `git pull --rebase` before pushing.
 
 ## Data on the DGX

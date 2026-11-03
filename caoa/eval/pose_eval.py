@@ -7,13 +7,12 @@ Legacy evaluation (reproduced first, see docs/PLAN.md):
 * `legacy/<grouping>`: `eval_pose_s2c_v2`'s numbers (E2/E3) per class grouping;
 * `legacy_valid_classes`: the older `calc_pose_accuracy_s2c` (E5).
 Additions, always labelled as such:
-* `benchmark/<convention>`: the official Scan2CAD protocol over the given scenes
-  (all their GT objects, misses counted), in both submission conventions;
-* `matched/<convention>`: Scan2CAD per-object formulas on the matched pairs only;
+* `s2c_criteria/<convention>`: the official Scan2CAD per-object criteria (20 cm / 20 deg / 20 %, its error
+  formulas) on the evaluated S2C-C objects, each against its own S2C-C ground truth, in both submission
+  conventions. Objects outside the evaluated set are not counted (user, 2026-10-29: the official protocol's
+  "all GT objects, misses = failures" over `full_annotations.json` was retired from the reports);
 * `proxy`: Scan2CAD formulas in the normalised frame.
 """
-
-import copy
 
 import numpy as np
 
@@ -49,8 +48,8 @@ def evaluate_legacy_only(pairs, pred, target) -> dict:
     return legacy_report.eval_pose_report(pred, target, [p.sym for p in pairs], groupings.class_labels(pairs, "scannet_class"))
 
 
-def evaluate(pairs, pred, target, norm_scale, norm_offset, s2c_annotations, full_annotations, cad_appearances, scenes) -> dict:
-    """pred / target: (N, 15) in the normalised test frame; `scenes`: benchmark scenes (all their GT counts)."""
+def evaluate(pairs, pred, target, norm_scale, norm_offset, s2c_annotations) -> dict:
+    """pred / target: (N, 15) in the normalised test frame; `s2c_annotations`: the S2C-C annotations, by scene."""
     syms = [p.sym for p in pairs]
     results = {
         "legacy": {g: legacy_report.eval_pose_report(pred, target, syms, groupings.class_labels(pairs, g)) for g in groupings.GROUPINGS},
@@ -61,34 +60,19 @@ def evaluate(pairs, pred, target, norm_scale, norm_offset, s2c_annotations, full
     }
 
     centers, rotations, extents = to_world(pred, norm_scale, norm_offset)
-    scene_set = set(scenes)
-    full = [a for a in full_annotations if a["id_scan"] in scene_set]
+    cats = np.array([scan2cad_benchmark.category_name(p.catid_cad) for p in pairs])
     for convention in scan2cad_benchmark.CONVENTIONS:
-        alignments = alignments_for(pairs, s2c_annotations, centers, rotations, extents, convention)
-
-        submission = {s: [] for s in scenes}
-        for p, a in sorted(zip(pairs, alignments), key=lambda x: (x[0].scene_id, x[0].model_index)):
-            if p.scene_id in scene_set:
-                submission[p.scene_id].append(a)
-        bench = scan2cad_benchmark.evaluate(submission, copy.deepcopy(full), cad_appearances)
-        results[f"benchmark/{convention}"] = {
-            "instance_mean": bench.instance_mean,
-            "class_mean": bench.class_mean,
-            "per_class": bench.class_accuracy(),
-            "support": {k: total for k, (_, total) in bench.per_class.items()},
-        }
-
         correct = []
-        for p, a in zip(pairs, alignments):
+        for p, a in zip(pairs, alignments_for(pairs, s2c_annotations, centers, rotations, extents, convention)):
             anno = s2c_annotations[p.scene_id]
             model = anno["aligned_models"][p.model_index]
             correct.append(scan2cad_benchmark.is_correct(a, *scan2cad_benchmark.ground_truth_pose(anno["trs"], model), model["sym"]))
         correct = np.array(correct)
-        cats = np.array([scan2cad_benchmark.category_name(p.catid_cad) for p in pairs])
         per_class = {c: float(correct[cats == c].mean()) for c in sorted(set(cats))}
-        results[f"matched/{convention}"] = {
+        results[f"s2c_criteria/{convention}"] = {
             "instance_mean": float(correct.mean()),
             "class_mean": float(np.mean(list(per_class.values()))),
             "per_class": per_class,
+            "support": {c: int((cats == c).sum()) for c in per_class},
         }
     return results

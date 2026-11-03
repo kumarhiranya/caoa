@@ -20,10 +20,13 @@ Last updated: 2026-10-28 (P8 leak quantified and fixed; P9 port done, legacy SEM
    the code did. Paper mismatches are recorded under
    [paper vs codebase mismatches](#paper-vs-codebase-mismatches) but not chased,
    since the paper may include post-processing or corrections.
-2. **The official Scan2CAD benchmark is reported in addition.** It is
-   replicated as-is: both submission conventions, the scale mean, 36-step
-   infinite symmetry. Any deviation from the official script needs the user's
-   approval.
+2. **Scan2CAD's official criteria are reported in addition, on the S2C-C annotations.** The per-object
+   criteria and formulas are replicated as-is (both submission conventions, the scale mean, 36-step infinite
+   symmetry; `caoa/eval/scan2cad_benchmark.py` keeps its parity tests). **User, 2026-10-29:** training,
+   testing and results use the S2C-C annotations only (the official `full_annotations.json` is not directly
+   compatible with the method), and objects we don't evaluate on, including GT CADs that S2C-C has no matched
+   instance for, are never counted as failures. So the reported addition is `s2c_criteria/<convention>` over
+   the evaluated objects; the official "all GT objects, misses = failures" protocol is no longer reported.
 3. **Scope is CAOA's evaluations only.** CIS2VR-era evaluations are out of
    scope: `tools/eval/evaluate_alignment_scan2cad.py`, `mnk_eval.py`, and the
    retrieval evals in `eval_utils.py` / `db_utils.py`. They are ported only if a
@@ -52,10 +55,10 @@ Last updated: 2026-10-28 (P8 leak quantified and fixed; P9 port done, legacy SEM
 | P4 | Data completion: CAD samplers, scene context; full ScanNet | **Code done; data local, caches built** (2026-10-21; `scene0212_00` unavailable) | CAD↔scan sanity; context parity (both variants) |
 | P5 | Completion datasets: S2C-Completion (completion view), SN-Indoor | **Code done; caches built** (r = 0: 2.0 GB, r = 1 m: 2.8 GB; train 6,220 / val 1,744) | Parity with recovered legacy loaders |
 | P6 | CAPCM model: ODGNet port + legacy completion evaluation | **Done** ([results](results/P6.md)) | Op/metric parity; re-scored `ODG_*_S2CC.csv` |
-| P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), **on the DGX** | **Done** ([results](results/P7.md)): test CDL1 45.00 vs 46.80; accepted by the user 2026-10-27 | Val curve vs `results/legacy_curves/s2ccompletion_upTransb1_val.csv`; ckpt-best test CDL1 vs 46.80 |
-| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Legacy reproduction done; leak quantified and fixed** ([results](results/P8.md)): 87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3; leak-free completion-only 82.6–83.1 (−4), inst+comp 80.9–81.8 (≤ −1.3); emb 512 / 256 leak-free running | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
+| P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), **on the DGX**; extended to concat and context | **Done** ([results](results/P7.md)): test CDL1 45.00 vs 46.80; accepted by the user 2026-10-27. Concat 44.42 vs 45.37; context best val 22.18 vs 22.47 (2026-10-29) | Val curve vs `results/legacy_curves/s2ccompletion_upTransb1_val.csv`; ckpt-best test CDL1 vs 46.80 |
+| P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Legacy reproduction done; leak quantified and fixed** ([results](results/P8.md)): 87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3; leak-free completion-only 82.6–83.1 (−4), inst+comp 80.9–81.8 (≤ −1.3); emb 512 / 256 leak-free 81.9 / 80.4 | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | **Port done** ([results](results/P9.md)); legacy `embeddings.npy` degenerate (wrong export inputs), regenerated (`cad_bbox`, user 2026-10-28); retraining open | 95.8% accuracy; legacy embeddings reproduced |
-| P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | **P10a running** (2026-10-28: SEM `cad_bbox` + concat completion-only, legacy and world completion frames); P10b–d planned | Ablation deltas under legacy + official evaluation |
+| P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | **P10a/b done, P10c running** ([results](results/P10.md)): SEM +1.1; Siamese separate trunks 83.8 (S2C criteria 83.4, best), shared 80.4; P10d planned | Ablation deltas under the legacy metric + S2C criteria |
 | P11 | Predicted instances: legacy SoftGroup evaluation, then the official pipeline | Planned | `sg_mnk_comp.csv`, `perclass_results.csv` |
 | P12 | Full-scale runs, Table 1 / Table 2 report, release | Planned | All rows reproduced or explained |
 
@@ -161,7 +164,7 @@ Follow-up (moved to P3b): the sample-set rule.
 Delivered:
 - `caoa/eval/metrics.py`: E1 (legacy) and the per-object Scan2CAD formulas.
 - `caoa/eval/scan2cad_benchmark.py`: the official protocol, `alignment_from_box` (both conventions).
-- `caoa/eval/pose_eval.py`: `legacy` / `benchmark/<conv>` / `matched/<conv>` / `proxy`.
+- `caoa/eval/pose_eval.py`: `legacy` / `benchmark/<conv>` / `matched/<conv>` / `proxy` (2026-10-29: `benchmark/*` retired, `matched/*` renamed `s2c_criteria/*`).
 
 Validation (passed):
 - E1 matches the legacy code exactly.
@@ -392,12 +395,12 @@ OCAM reads the target rotation from the completion's frame-tied point layout: wi
 95% of its predictions turn 180° (accuracy 86.5 → 12.8), while inst+comp is unaffected. Retrained on `world`-frame
 completions (user-approved; caches `<name>__world`, 0.78 GiB each): completion-only 86.75 → 82.62 (S2C-C) / 83.05 (concat),
 inst+comp 81.49 → 80.85 / 83.10 → 81.81; official −center −2.2 to −2.7 for completion-only. Completion-only stays the best
-leak-free setup. emb 512 / 256 leak-free running.
+leak-free setup. emb 512 / 256 leak-free: 81.9 / 80.4 final (done 2026-10-28).
 
 Validation gate:
 - Legacy targets within tolerance (full data), or the same ordering and gains on the subset.
 - Leak quantified.
-- All reports: legacy (E2/E3), official, matched-only.
+- All reports: legacy (E2/E3), S2C criteria (formerly matched-only).
 
 Decision needed: how leaky legacy numbers are presented.
 
@@ -436,7 +439,11 @@ which pipeline, to decide), E11 on legacy's exact sample set, timing.
 
 Validation gate:
 - Unit tests: Chamfer 0 at the GT pose; weights shared; a 32-sample overfit reaches ~100%.
-- Ablation table on a fixed split under the legacy report (E2) and the official protocol.
+- Ablation table on a fixed split under the legacy report (E2) and the S2C criteria.
+
+**Status (2026-11-03, [results](results/P10.md)).** P10a (SEM, leak-free) 84.7 / 84.17; P10b separate trunks 84.1 / 83.80
+(S2C criteria −center 83.4, the best leak-free run), shared trunk 79.2 / 80.36. P10c (separate trunks + t2/r3/s2 +
+5 × Chamfer, CAD-at-pred vs CAD-at-GT, user option 1) running; P10d (paper schedule: wd 1e-4, 150 epochs ≈ 15.6k steps) next.
 
 ## P11 — Predicted instances
 
@@ -452,10 +459,12 @@ Validation gate:
 
 **P11b. SphericalMask (gated).** Official code/checkpoint on ScanNet val; separate environment; needs P4d-val.
 
-**P11c. Official pipeline.** Predicted instances → completion (`world` frame) → CAD choice → OCAM → submission (both conventions) → official protocol, reported next to the legacy protocol.
+**P11c. Full pipeline.** Predicted instances → completion (`world` frame) → CAD choice → OCAM → S2C criteria (both conventions) on the predicted instances matched to S2C-C objects, reported next to the legacy protocol. The capture rate (matched / S2C-C objects) is reported separately; unmatched objects are not counted as failures (user, 2026-10-29).
 
-**P11d. CAD choice (switch).**
-- legacy: GT CAD via overlap matching;
+**P11d. CAD choice (switch).** The legacy object–CAD matching (retrieval) module was lost and is re-implemented from
+scratch (user, 2026-10-29) with 3D-Match or a similar or better method. It completes the framework and is not a
+contribution of the paper; the alignment evaluations use the GT CAD, since they measure alignment only.
+- legacy: GT CAD via overlap matching (the evaluation setting);
 - pool: retrieval from the scene's CAD pool;
 - paper: retrieval from ShapeNet (ambiguous).
 
@@ -539,7 +548,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 |---|---|---|---|
 | Sample-set class rule | `relpose_cache` (reported numbers); `v2` (the V2 code) | `all_matched` | P3b, P4c |
 | Per-class grouping | `scannet_class` (GT CSVs), `cad_taxonomy_name` (SG CSV), `valid_classes` (E5), `cad_top8` (Table 1, hypothesis) | official 9 categories | P3b |
-| Pose eval frame and metric | normalised frame, E1 | official protocol (metres, both conventions), matched-only | P2 ✅ |
+| Pose eval frame and metric | normalised frame, E1 | S2C criteria: official per-object criteria (metres, both conventions) on the evaluated S2C-C objects (user 2026-10-29; the all-GT official protocol is retired) | P2 ✅ |
 | Training loop / validation schedule | legacy counter semantics, epoch overrun, validation every 1k | + labelled final evaluation of `model_final` | P3b |
 | Train data order | `shuffle=False` | shuffled | P3 ✅ (switch exists) |
 | Scene context | `v2` (scene minus instance) / `relpose_cache` (incl. instance, subsampled) | paper "enlarged by 100 cm" (ambiguous) | P4b |
@@ -552,14 +561,14 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | OCAM model | object-only `mnkpv3`; RelPose (unshared) | Siamese shared + SEM | P10 |
 | Chamfer loss / weights | object-self; t2q1s2 | CAD-object ×5; t2r3s2 | P10 |
 | OCAM optimiser | wd 1e-3, 15k steps, lr/100 | wd 1e-4, 150 epochs, 1e-6 | P10 |
-| SG evaluation | matched predictions only | official protocol | P11 |
-| CAD for alignment | GT CAD | retrieval | P11 |
+| SG evaluation | matched predictions only | S2C criteria on matched predictions + capture rate (user, 2026-10-29) | P11 |
+| CAD for alignment | GT CAD (the evaluation setting) | retrieval: 3D-Match or similar, re-implemented (the legacy module is lost) | P11 |
 
 ## Legacy and benchmark issue register
 
 | Issue | Effect | Handling |
 |---|---|---|
-| Legacy rotation metric (scrambled quaternions, Euler max, `min` over symmetric candidates) | Symmetric objects pass almost always | Reproduced (E1); official reported alongside |
+| Legacy rotation metric (scrambled quaternions, Euler max, `min` over symmetric candidates) | Symmetric objects pass almost always | Reproduced (E1); S2C criteria reported alongside |
 | Legacy scale error mean(\|ratio − 1\|) | Different pass set | Reproduced (E1) |
 | Translation threshold in normalised units | "20 cm" = 20% of object size | Reproduced; official in metres |
 | V2 and RelPose datasets share one cache file | Reported sample sets were built by RelPose's rule (1,864 / 6,671) | `relpose_cache` rule (P3b) |
@@ -576,7 +585,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | Concat / SN-Indoor `ckpt-last` overwritten after their Mar 5 tests; SN-55 checkpoint missing | Those Table 2 / log rows can't be re-scored | Retrain in P7 |
 | Official benchmark −center GT reference | Perfect plain poses score 77.2% | Kept; both conventions |
 | Official scale mean / 36-step INF symmetry | Lenient scale; ≤5° slack | Kept |
-| Paper GT row exceeds the official ceiling (76.5%) | Not the official protocol | Legacy + official + matched-only |
+| Paper GT row exceeds the official ceiling (76.5%) | Not the official protocol | Legacy + S2C criteria; the all-GT protocol is not reported (user, 2026-10-29) |
 | No alignment checkpoint uses SEM; no SphericalMask outputs | "CAPCM+SEM" / Sph rows unverifiable as-is | Retrain (P10); run SphericalMask (P11b) |
 
 ## Disk budget

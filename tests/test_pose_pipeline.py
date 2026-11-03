@@ -1,4 +1,3 @@
-import json
 
 import numpy as np
 import pytest
@@ -72,20 +71,13 @@ def test_ground_truth_predictions_score_perfectly(val_pairs):
     ds = ObjectPoseDataset(pairs, train=False)
     batch = collate([ds[i] for i in range(len(ds))])
     target = batch["target"].numpy()
-    with open(PATHS.scan2cad_full_annotations) as f:
-        full = json.load(f)
-    with open(PATHS.scan2cad_cad_appearances) as f:
-        appearances = json.load(f)
-    scenes = sorted({p.scene_id for p in pairs})
     res = pose_eval.evaluate(
-        pairs, target, target, batch["norm_scale"].numpy(), batch["norm_offset"].numpy(),
-        scan2cad.load_annotations(PATHS.s2c_annotations), full, appearances, scenes,
+        pairs, target, target, batch["norm_scale"].numpy(), batch["norm_offset"].numpy(), scan2cad.load_annotations(PATHS.s2c_annotations)
     )
     assert res["legacy"]["scannet_class"]["avg"]["total_acc"] == 1.0
     assert res["legacy"]["table1"]["per_class"]["total"]["micro_avg"] == 1.0
-    assert res["matched/minus_center"]["instance_mean"] == 1.0
-    n_gt = sum(len(a["aligned_models"]) for a in full if a["id_scan"] in set(scenes))
-    assert res["benchmark/minus_center"]["instance_mean"] == pytest.approx(len(pairs) / n_gt)
+    assert res["s2c_criteria/minus_center"]["instance_mean"] == 1.0
+    assert res["s2c_criteria/minus_center"]["class_mean"] == 1.0
 
 
 @needs_cuda

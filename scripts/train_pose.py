@@ -27,8 +27,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
 from caoa.data import scan2cad
-from caoa.data.labels import scannet_split
-from caoa.data.pairs import cache_dir, load_pairs
+from caoa.data.pairs import load_pairs
 from caoa.data.pose_completion import load_pose_completions
 from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate, load_cad_points, load_sym_embeddings, sem_embedding_path
 from caoa.eval import groupings, pose_eval
@@ -225,20 +224,11 @@ def train(model, train_loader, val_loader, val_pairs, tcfg, out_dir, device):
 
 
 def evaluate(final, val_pairs, paths):
-    with open(paths.scan2cad_full_annotations) as f:
-        full = json.load(f)
-    with open(paths.scan2cad_cad_appearances) as f:
-        appearances = json.load(f)
-    # Benchmark scenes: every locally available val scene, including those with no matched pairs.
-    scenes = sorted(p.stem for p in cache_dir(paths.cache).glob("scene*.pkl") if scannet_split(p.stem) == "val")
     pairs = [val_pairs[i] for i in final["index"]]
     results = pose_eval.evaluate(
-        pairs, final["pred"], final["target"], final["norm_scale"], final["norm_offset"],
-        scan2cad.load_annotations(paths.s2c_annotations), full, appearances, scenes,
+        pairs, final["pred"], final["target"], final["norm_scale"], final["norm_offset"], scan2cad.load_annotations(paths.s2c_annotations)
     )
     results["n_val_pairs"] = len(pairs)
-    results["n_benchmark_scenes"] = len(scenes)
-    results["n_benchmark_gt"] = sum(len(a["aligned_models"]) for a in full if a["id_scan"] in set(scenes))
     return results
 
 
@@ -255,8 +245,7 @@ def write_per_class_csvs(results, out_dir):
 
 
 def print_summary(results):
-    print(f"\nval pairs {results['n_val_pairs']} (class rule {results['class_rule']}), "
-          f"benchmark scenes {results['n_benchmark_scenes']} ({results['n_benchmark_gt']} GT objects)")
+    print(f"\nval pairs {results['n_val_pairs']} (class rule {results['class_rule']})")
     for g in groupings.GROUPINGS:
         r = results["legacy"][g]
         print(f"legacy [{g:<17}] micro {r['per_class']['total']['micro_avg']:.4f}  macro {r['per_class']['total']['macro_avg']:.4f}")
@@ -264,7 +253,7 @@ def print_summary(results):
     print(f"legacy MAE {a['mae']}  mean rot err {a['avg']['rotation_error_deg']:.2f} deg  mean scale err {a['avg']['mean_scale_error_pct']:.2f}%")
     e5 = results["legacy_valid_classes"]
     print(f"legacy calc_pose_accuracy_s2c (VALID_CLASSES): avg {e5['avg']['total_acc']:.4f}  cls_avg {e5['cls_avg']['total_acc']:.4f}")
-    for key in ("benchmark/plain", "benchmark/minus_center", "matched/plain", "matched/minus_center"):
+    for key in ("s2c_criteria/minus_center", "s2c_criteria/plain"):
         r = results[key]
         print(f"{key:<24} instance {r['instance_mean']:.4f}  class {r['class_mean']:.4f}")
     print(f"inference ms/sample: {results['timing_ms_per_sample']}")
