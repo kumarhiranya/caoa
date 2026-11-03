@@ -68,3 +68,29 @@ def resample_mesh(mesh_cad, density: float = 1) -> np.ndarray:
     B = vertices[faces[sample_face_idx, 1], :]
     C = vertices[faces[sample_face_idx, 2], :]
     return (1 - np.sqrt(r[:, 0:1])) * A + np.sqrt(r[:, 0:1]) * (1 - r[:, 1:]) * B + np.sqrt(r[:, 0:1]) * r[:, 1:] * C
+
+
+# CAD retrieval database (P11d): every ShapeNetV2 model, sampled once (`scripts/build_shapenet_points.py`).
+SHAPENET_POINTS_VERSION = "shapenet_points_v1"
+SHAPENET_POINTS = 2048
+
+
+def shapenet_points_path(cache_root: Path) -> Path:
+    return Path(cache_root) / SHAPENET_POINTS_VERSION / f"bbox_{SHAPENET_POINTS}.npz"
+
+
+def list_models(shapenet_root: Path) -> list[str]:
+    """Every model in the ShapeNetV2 copy as `catid_idcad`, sorted (55 synsets; the per-synset legacy .npy files are skipped)."""
+    root = Path(shapenet_root)
+    return sorted(
+        f"{c.name}_{m.name}"
+        for c in root.iterdir() if c.is_dir() and c.name.isdigit() and len(c.name) == 8
+        for m in c.iterdir() if m.is_dir()
+    )
+
+
+def load_shapenet_points(cache_root: Path) -> dict:
+    """{keys (N,) str, catids (N,) str, points (N, 2048, 3) float32 in the CAD's own bbox frame (centred, longest side 1),
+    bbox_center / bbox_extent (N, 3) of the samples in `model_normalized` coordinates}."""
+    with np.load(shapenet_points_path(cache_root)) as f:
+        return {k: f[k] for k in f.files}

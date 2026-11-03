@@ -1,0 +1,32 @@
+# P11d CAD retrieval, stage 1 (user decisions 2026-11-03): joint scan-CAD embedding over all ShapeNetV2 models;
+# query = leak-free concat CAPCM completion + instance points (half each), world frame; search within the GT synset
+# ("same") and over everything ("all"). Re-ranking by Chamfer in the predicted box (stage 2) comes after.
+name: retrieval_embed_comp_inst
+seed: 0
+
+data:
+  class_rule: relpose_cache  # the pairs that have leak-free completions cached (6,663 train / 1,864 val)
+  completion: {name: odg_concat_snaug_s2cc_upTransb_comp, frame: world}
+  num_points: 2048
+  inst_fraction: 0.5
+
+model:
+  embedding: 512  # OCAMEncoder width (pooled feature 2 x 512)
+  out_dim: 256
+  voxel_size: 0.01
+  temperature: 0.07  # initial; learnable
+
+train:
+  batch_size: 64
+  neg_same_category: 4  # per query
+  neg_random: 64
+  max_steps: 10000  # ~96 epochs of 104 steps
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  min_lr_ratio: 0.01
+  num_workers: 8
+  stat_freq: 100
+  val_freq: 1000
+
+eval:
+  yaws: [1, 8]  # 8: mean query embedding over 8 yaw rotations

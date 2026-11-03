@@ -468,6 +468,20 @@ contribution of the paper; the alignment evaluations use the GT CAD, since they 
 - pool: retrieval from the scene's CAD pool;
 - paper: retrieval from ShapeNet (ambiguous).
 
+**P11d design (user decisions 2026-11-03), started 2026-11-03** (`caoa/retrieval/`):
+- Method: a learned joint scan–CAD embedding (after Dahnert et al. 2019; separate query and CAD encoders, each the OCAM
+  sparse-conv trunk + projection, InfoNCE against the GT CAD with same-synset and random ShapeNetV2 negatives), then
+  re-ranking of the top-k by Chamfer distance with each candidate placed in the OCAM box (stage 2, to do). Chosen over
+  3DMatch-style correspondence voting: 3DMatch is a local registration descriptor and too slow over 52k models.
+- Database: every ShapeNetV2 model (52,472 sampled; 19 cars have no `model_normalized.obj`), 2,048 points each in the
+  CAD's own bounding-box frame (`scripts/build_shapenet_points.py`, cache `shapenet_points_v1`, 1.21 GiB). Search within
+  the query's synset (`category: same`, default; the GT CAD's synset in the GT-instance setting) or over all (`all`).
+- Query: leak-free CAPCM completion + instance points (half each), world frame, bbox-normalised; random yaw in
+  training, optional yaw test-time averaging.
+- Metrics (`caoa/retrieval/search.py`): exact-model recall@k, GT rank, category accuracy, CD-L1 / CD-L2 between the
+  top-1 and GT CADs (shape similarity; near-duplicates count) vs a random same-synset CAD.
+- Data: the `relpose_cache` pairs that have cached completions (6,663 train / 1,864 val).
+
 Validation gate:
 - Legacy SG reproduction within tolerance.
 - The GT-instance pipeline equals P8/P10.
@@ -604,6 +618,7 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | ScanNet val scenes (P4d-val) | ~3 GB | done |
 | ScanNet train scenes (P4d-train) | 9.2 GiB | done (scene0212_00 unavailable) |
 | Local ShapeNet mirror (CAD .obj + SN-Indoor partials) | 32.3 GiB | done (194,208 files) |
+| ShapeNetV2 retrieval points (`shapenet_points_v1`, 52,472 × 2,048 float32) | 1.21 GiB, on the DGX lab share | P11d, done (user OK 2026-11-03) |
 | SphericalMask env + outputs | est. 6–10 GB | P11b, gated |
 | Checkpoints | ~0.1–0.3 GB per OCAM run | ongoing |
 
