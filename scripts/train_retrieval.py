@@ -24,18 +24,10 @@ from caoa.data.pose_completion import load_pose_completions
 from caoa.data.shapenet import load_shapenet_points
 from caoa.paths import REPO_ROOT, load_paths
 from caoa.retrieval import search
-from caoa.retrieval.data import RetrievalQueries, cad_key, collate, query_points
+from caoa.retrieval.data import RetrievalQueries, cad_key, collate, fixed_queries
 from caoa.retrieval.model import CADRetrieval, info_nce
 
 CAD_CHUNK = 256
-
-
-def fixed_queries(pairs, completions, dcfg, seed: int) -> np.ndarray:
-    state = np.random.get_state()
-    np.random.seed(seed)
-    out = np.stack([query_points(p, completions[(p.scene_id, p.model_index)], dcfg["num_points"], dcfg["inst_fraction"]) for p in pairs])
-    np.random.set_state(state)
-    return out
 
 
 def evaluate(model, queries, targets, db_points_gpu, db_catids, device, yaws=(1,)) -> dict:
@@ -93,7 +85,7 @@ def main():
     train_ds = RetrievalQueries(pairs["train"], completions, db_index, train=True, num_points=dcfg["num_points"], inst_fraction=dcfg["inst_fraction"])
     loader = DataLoader(train_ds, batch_size=tcfg["batch_size"], shuffle=True, drop_last=True, num_workers=tcfg["num_workers"],
                         collate_fn=collate, persistent_workers=True)
-    val_queries = fixed_queries(pairs["val"], completions, dcfg, cfg["seed"])
+    val_queries = fixed_queries(pairs["val"], completions, dcfg["num_points"], dcfg["inst_fraction"], cfg["seed"])
     val_targets = torch.tensor([db_index[cad_key(p)] for p in pairs["val"]])
 
     model = CADRetrieval(**cfg["model"]).to(device)

@@ -43,6 +43,16 @@ def query_points(p: Pair, completion: np.ndarray, num_points: int = QUERY_POINTS
     return normalize_bbox(pts).astype(np.float32)
 
 
+def fixed_queries(pairs: list[Pair], completions: dict, num_points: int = QUERY_POINTS, inst_fraction: float = 0.5,
+                  seed: int = 0) -> np.ndarray:
+    """(Q, num_points, 3) evaluation queries (yaw as stored), reproducible: the global NumPy RNG is seeded and restored."""
+    state = np.random.get_state()
+    np.random.seed(seed)
+    out = np.stack([query_points(p, completions[(p.scene_id, p.model_index)], num_points, inst_fraction) for p in pairs])
+    np.random.set_state(state)
+    return out
+
+
 class RetrievalQueries(Dataset):
     """Queries for `pairs`; `target` is the index of the pair's GT CAD in the database (`db_index`: key -> index)."""
 
