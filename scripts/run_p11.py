@@ -3,8 +3,10 @@
 1. Instances (`caoa.data.softgroup`): every predicted instance of a kept class (not door / window / picture / curtain /
    shower curtain), points from our ScanNet loader in the Scan2CAD world frame.
 2. Matching for evaluation: IoU >= 0.5 with the S2C-C val objects (`relpose_cache`, the 1,864), one-to-one, highest
-   first. Capture rate (matched / objects) and false positives (unmatched predictions) are reported per confidence
-   threshold; pose is evaluated on the matched instances at `--conf`.
+   first. Capture rate (matched / objects) per confidence threshold; pose is evaluated on the matched instances at
+   `--conf` (global 0.3; per-class thresholds did not help, docs/results/P11.md). Predictions not matched to an S2C-C
+   object are mostly real objects Scan2CAD did not align, so detection precision / recall are measured separately against
+   all ScanNet GT instances of the predicted class (same matching rule).
 3. Completion: the leak-free concat CAPCM in the world frame (as `build_pose_completions.py --frame world`).
 4. Retrieval + pose (`caoa.retrieval.pipeline`): stage 1 within the synsets of SoftGroup's predicted class
    (`class_synsets`, from the train pairs; "otherfurniture" and unmapped classes search all) and over all synsets;
@@ -26,12 +28,13 @@ import torch
 import yaml
 
 from caoa.data import scan2cad
-from caoa.data.labels import scannet_split
+from caoa.data.labels import scannet20_name, scannet_split
 from caoa.data.legacy_sampling import tile_to_min
 from caoa.data.pairs import load_pairs
 from caoa.data.pose_completion import MIN_POINTS, complete, load_pose_completions, to_canonical
+from caoa.data.scannet import dominant_label
 from caoa.data.shapenet import load_shapenet_points
-from caoa.data.softgroup import EXCLUDED_CLASSES, load_scene_instances, match_instances, sg_pred_path
+from caoa.data.softgroup import EXCLUDED_CLASSES, INSTANCE_CLASSES, load_scene_instances, match_instances, sg_pred_path
 from caoa.eval.scan2cad_benchmark import category_name
 from caoa.models.odgnet import UpTrans, load_legacy_checkpoint
 from caoa.paths import REPO_ROOT, load_paths
@@ -43,6 +46,7 @@ CAPCM = "experiments/UpTrans_comp/Concat_SN_S2CC/concat_snaug_s2cc_upTransb_comp
 CONF_THRESHOLDS = (0.0, 0.1, 0.3, 0.5)
 SEARCH_ALL = ("otherfurniture",)
 SG_TO_SCANNET20 = {"refrigerator": "refridgerator"}  # SoftGroup's spelling vs ours
+KEPT_SCANNET20 = {SG_TO_SCANNET20.get(c, c) for c in INSTANCE_CLASSES if c not in EXCLUDED_CLASSES}
 CTX = {}
 
 
@@ -69,12 +73,23 @@ def scene_job(scene_id):
     instances = [i for i in instances if i.label not in EXCLUDED_CLASSES]
     objects = pairs_by_scene.get(scene_id, [])
     gt_masks = [scene.instance == p.instance_id for p in objects]
-    per_conf = {}
+    ids = [i for i in np.unique(scene.instance) if i >= 0]
+    sn_masks = [scene.instance == i for i in ids]
+    sn_cls = [scannet20_name(dominant_label(scene.semantic[m])) for m in sn_masks]
+    per_conf, detection = {}, {}
     for t in CONF_THRESHOLDS:
         keep = [k for k, i in enumerate(instances) if i.conf >= t]
         m, _ = match_instances([instances[k] for k in keep], gt_masks) if gt_masks else ({}, None)
         per_conf[t] = {keep[i]: v for i, v in m.items()}
-    return scene_id, instances, [(p.scene_id, p.model_index) for p in objects], per_conf
+        # detection against every ScanNet instance of the predicted class (IoU of other classes zeroed)
+        tp = 0
+        for cls in {SG_TO_SCANNET20.get(instances[k].label, instances[k].label) for k in keep}:
+            ks = [k for k in keep if SG_TO_SCANNET20.get(instances[k].label, instances[k].label) == cls]
+            gs = [g for g, c in zip(sn_masks, sn_cls) if c == cls]
+            tp += len(match_instances([instances[k] for k in ks], gs)[0]) if gs else 0
+        detection[t] = (len(keep), tp)
+    n_sn = sum(c in KEPT_SCANNET20 for c in sn_cls)
+    return scene_id, instances, [(p.scene_id, p.model_index) for p in objects], per_conf, detection, n_sn
 
 
 def main():
@@ -86,6 +101,7 @@ def main():
     parser.add_argument("--pose", default="siamunshared_world_comp_concat_only_emb1024")
     parser.add_argument("--workers", type=int, default=20)
     parser.add_argument("--limit", type=int, default=0, help="first N scenes only (smoke test)")
+    parser.add_argument("--matching-only", action="store_true", help="stop after the capture / detection statistics")
     args = parser.parse_args()
     assert args.conf in CONF_THRESHOLDS
     paths = load_paths()
@@ -108,13 +124,15 @@ def main():
     CTX.update(paths=paths, annos=annos, pairs_by_scene=pairs_by_scene)
     with Pool(args.workers) as pool:
         per_scene = pool.map(scene_job, scenes, chunksize=1)
-    n_objects = sum(len(objs) for _, _, objs, _ in per_scene)
-    print(f"{len(scenes)} scenes, {sum(len(i) for _, i, _, _ in per_scene)} kept-class predictions, {n_objects} S2C-C objects")
+    n_objects = sum(len(r[2]) for r in per_scene)
+    n_sn = sum(r[5] for r in per_scene)
+    print(f"{len(scenes)} scenes, {sum(len(r[1]) for r in per_scene)} kept-class predictions, {n_objects} S2C-C objects, "
+          f"{n_sn} ScanNet instances of the kept classes")
 
     matching = {}
     for t in CONF_THRESHOLDS:
         cap, tot, fp, pred_n, ious = Counter(), Counter(), Counter(), Counter(), []
-        for _, insts, objs, per_conf in per_scene:
+        for _, insts, objs, per_conf, _, _ in per_scene:
             matched_objs = {objs[j] for j, _ in per_conf[t].values()}
             for key in objs:
                 cat = category_name(pair_of[key].catid_cad)
@@ -133,14 +151,21 @@ def main():
             "false_positives_per_class": dict(fp), "predictions_per_class": dict(pred_n),
             "iou_mean": float(np.mean(ious)) if ious else None,
         }
+        kept, tp = (sum(r[4][t][i] for r in per_scene) for i in (0, 1))
+        prec, rec = tp / max(kept, 1), tp / max(n_sn, 1)
+        matching[str(t)]["detection"] = {"predictions": kept, "true_positives": tp, "scannet_instances": n_sn, "precision": prec,
+                                         "recall": rec, "f1": 2 * prec * rec / max(prec + rec, 1e-9)}
         m = matching[str(t)]
         print(f"conf >= {t}: capture {m['capture']:.4f} ({m['n_matched']}/{m['n_objects']}), predictions {m['n_predictions']}, "
-              f"false positives {m['false_positives']}, mean IoU {m['iou_mean']:.3f}")
+              f"not S2C-C {m['false_positives']}, mean IoU {m['iou_mean']:.3f} | detection vs ScanNet: precision {prec:.3f} "
+              f"recall {rec:.3f} F1 {m['detection']['f1']:.3f}")
     (out_dir / "matching.json").write_text(json.dumps(matching, indent=1))
+    if args.matching_only:
+        return
 
     # matched instances at --conf, as pairs: the instance's points, evaluated against the matched object
     sg_pairs, labels, gt_pairs = [], [], []
-    for _, insts, objs, per_conf in per_scene:
+    for _, insts, objs, per_conf, _, _ in per_scene:
         for k, (j, _) in sorted(per_conf[args.conf].items()):
             gt = pair_of[objs[j]]
             inst = insts[k]
