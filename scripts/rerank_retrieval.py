@@ -11,7 +11,7 @@ OCAM test frame:
 Selections reported: `stage1` (top-1 of the embedding), `rerank_<score>`, `oracle_topk` (the candidate closest to the GT
 CAD: what a perfect re-ranker could reach), and `gt_cad` (the GT CAD through this same pipeline; reproduces P10b).
 Per selection: retrieval metrics (exact hit, CD to the GT CAD) and pose accuracy (legacy metric on the box; S2C criteria
-with the chosen CAD's own bounding box and centre). Output: `outputs/<name>/results.json`.
+with the chosen CAD's own bounding box and centre, unchanged; and the CAD-independent box variant, `s2c_box`). Output: `outputs/<name>/results.json`.
 
     uv run python scripts/rerank_retrieval.py [--k 10]
 """
@@ -32,7 +32,7 @@ from caoa.data.pairs import load_pairs
 from caoa.data.pose_completion import load_pose_completions
 from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate
 from caoa.data.shapenet import load_cad_mesh, load_shapenet_points, sample_uniform
-from caoa.eval import groupings, legacy_report, scan2cad_benchmark
+from caoa.eval import box_criteria, groupings, legacy_report, scan2cad_benchmark
 from caoa.eval.pose_eval import to_world
 from caoa.models.chamfer import nn_squared_distances
 from caoa.models.ocam import OCAMSiamese
@@ -232,11 +232,13 @@ def main():
             "cd_l1_to_gt": float(cd.mean()),
             "legacy_total_acc": legacy["total_acc"], "legacy_q_acc": legacy["q_acc"], "legacy_s_acc": legacy["s_acc"],
             "s2c_criteria": crit,
+            "s2c_box": box_criteria.evaluate_boxes(pairs, centers, rotations, extents, annos),
         }
         r = results[name]
         print(f"{name:12s} exact {r['exact_hit']:.3f}  CD-L1 to GT {r['cd_l1_to_gt']:5.1f}  legacy {r['legacy_total_acc']:.4f} "
               f"(rot {r['legacy_q_acc']:.3f} scale {r['legacy_s_acc']:.3f})  S2C −center {crit['minus_center']['instance_mean']:.4f} / "
-              f"{crit['minus_center']['class_mean']:.4f}  plain {crit['plain']['instance_mean']:.4f}")
+              f"{crit['minus_center']['class_mean']:.4f}  plain {crit['plain']['instance_mean']:.4f}  "
+              f"box {r['s2c_box']['instance_mean']:.4f} / {r['s2c_box']['class_mean']:.4f}")
     (out_dir / "results.json").write_text(json.dumps(results, indent=1))
 
 

@@ -78,6 +78,7 @@ def test_ground_truth_predictions_score_perfectly(val_pairs):
     assert res["legacy"]["table1"]["per_class"]["total"]["micro_avg"] == 1.0
     assert res["s2c_criteria/minus_center"]["instance_mean"] == 1.0
     assert res["s2c_criteria/minus_center"]["class_mean"] == 1.0
+    assert res["s2c_box"]["instance_mean"] == 1.0
 
 
 @needs_cuda

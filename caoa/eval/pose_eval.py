@@ -11,13 +11,16 @@ Additions, always labelled as such:
   formulas) on the evaluated S2C-C objects, each against its own S2C-C ground truth, in both submission
   conventions. Objects outside the evaluated set are not counted (user, 2026-10-29: the official protocol's
   "all GT objects, misses = failures" over `full_annotations.json` was retired from the reports);
+* `s2c_box`: the same criteria on the oriented box instead of the CAD (`caoa.eval.box_criteria`; CAD-independent,
+  added 2026-11-03 next to the unchanged `s2c_criteria`; with the GT CAD it differs from `s2c_criteria/minus_center`
+  only through the benchmark's translation reference point, see that module);
 * `proxy`: Scan2CAD formulas in the normalised frame.
 """
 
 import numpy as np
 
 from caoa.data.pairs import Pair
-from caoa.eval import groupings, legacy_report, metrics, scan2cad_benchmark
+from caoa.eval import box_criteria, groupings, legacy_report, metrics, scan2cad_benchmark
 from caoa.geometry import nearest_rotation
 
 
@@ -75,4 +78,5 @@ def evaluate(pairs, pred, target, norm_scale, norm_offset, s2c_annotations) -> d
             "per_class": per_class,
             "support": {c: int((cats == c).sum()) for c in per_class},
         }
+    results["s2c_box"] = box_criteria.evaluate_boxes(pairs, centers, rotations, extents, s2c_annotations)
     return results

@@ -253,7 +253,7 @@ def print_summary(results):
     print(f"legacy MAE {a['mae']}  mean rot err {a['avg']['rotation_error_deg']:.2f} deg  mean scale err {a['avg']['mean_scale_error_pct']:.2f}%")
     e5 = results["legacy_valid_classes"]
     print(f"legacy calc_pose_accuracy_s2c (VALID_CLASSES): avg {e5['avg']['total_acc']:.4f}  cls_avg {e5['cls_avg']['total_acc']:.4f}")
-    for key in ("s2c_criteria/minus_center", "s2c_criteria/plain"):
+    for key in ("s2c_criteria/minus_center", "s2c_criteria/plain", "s2c_box"):
         r = results[key]
         print(f"{key:<24} instance {r['instance_mean']:.4f}  class {r['class_mean']:.4f}")
     print(f"inference ms/sample: {results['timing_ms_per_sample']}")
