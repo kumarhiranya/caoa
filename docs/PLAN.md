@@ -58,8 +58,8 @@ Last updated: 2026-10-28 (P8 leak quantified and fixed; P9 port done, legacy SEM
 | P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), **on the DGX**; extended to concat and context | **Done** ([results](results/P7.md)): test CDL1 45.00 vs 46.80; accepted by the user 2026-10-27. Concat 44.42 vs 45.37; context best val 22.18 vs 22.47 (2026-10-29) | Val curve vs `results/legacy_curves/s2ccompletion_upTransb1_val.csv`; ckpt-best test CDL1 vs 46.80 |
 | P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Legacy reproduction done; leak quantified and fixed** ([results](results/P8.md)): 87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3; leak-free completion-only 82.6–83.1 (−4), inst+comp 80.9–81.8 (≤ −1.3); emb 512 / 256 leak-free 81.9 / 80.4 | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | **Port done** ([results](results/P9.md)); legacy `embeddings.npy` degenerate (wrong export inputs), regenerated (`cad_bbox`, user 2026-10-28); retraining open | 95.8% accuracy; legacy embeddings reproduced |
-| P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | **P10a/b done, P10c running** ([results](results/P10.md)): SEM +1.1; Siamese separate trunks 83.8 (S2C criteria 83.4, best), shared 80.4; P10d planned | Ablation deltas under the legacy metric + S2C criteria |
-| P11 | Predicted instances: legacy SoftGroup evaluation, then the official pipeline | Planned | `sg_mnk_comp.csv`, `perclass_results.csv` |
+| P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | **P10a–c done** ([results](results/P10.md)): SEM +1.1; Siamese separate trunks 83.8 (S2C criteria 83.4, best), shared 80.4; paper loss (P10c) 82.9, no gain; P10d planned | Ablation deltas under the legacy metric + S2C criteria |
+| P11 | Predicted instances: legacy SoftGroup evaluation, then the official pipeline | **P11d (CAD retrieval) stages 1–2 done** ([results](results/P11d.md)); `s2c_box` criteria added (user); P11a–c planned | `sg_mnk_comp.csv`, `perclass_results.csv` |
 | P12 | Full-scale runs, Table 1 / Table 2 report, release | Planned | All rows reproduced or explained |
 
 Dependencies:
@@ -495,7 +495,7 @@ Decisions needed: retrieval protocol; SphericalMask installation.
 - `scripts/report.py` produces:
   - every legacy layout (E2/E3/E5/E8/E9/E11);
   - Table 1 in the paper's grouping (validated in P3b.5);
-  - the official protocol with all 9 categories in both conventions;
+  - the S2C criteria (both conventions) and the CAD-independent `s2c_box` on the evaluated S2C-C objects (user, 2026-10-29 / 11-03);
   - Table 2;
   - baselines from the original papers.
 - `docs/RESULTS.md`: every paper number next to ours; each deviation traced to the issue register.
