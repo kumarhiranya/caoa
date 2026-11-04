@@ -59,7 +59,7 @@ Last updated: 2026-10-28 (P8 leak quantified and fixed; P9 port done, legacy SEM
 | P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Legacy reproduction done; leak quantified and fixed** ([results](results/P8.md)): 87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3; leak-free completion-only 82.6–83.1 (−4), inst+comp 80.9–81.8 (≤ −1.3); emb 512 / 256 leak-free 81.9 / 80.4 | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | **Done** (2026-11-04, [results](results/P9.md)): port parity; legacy `embeddings.npy` degenerate, regenerated (`cad_bbox`); E11 sample set = V2 rule (95.26 vs 95.80, accepted); retraining matches legacy on unseen CADs (91.1) with the BatchNorm fix; legacy checkpoint kept | 95.8% accuracy; legacy embeddings reproduced |
 | P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | **Done** (2026-11-03, [results](results/P10.md)): best = Siamese with separate trunks, legacy loss and schedule: 83.80 legacy, S2C criteria 83.4 / 78.6, box 85.0 / 81.2 (baseline 83.05 / 80.6 / 81.8). SEM helps (+1.1); shared trunk (80.4), paper loss (82.9) and paper schedule (81.2) don't | Ablation deltas under the legacy metric + S2C criteria; unit tests incl. 32-sample overfit |
-| P11 | Predicted instances: legacy SoftGroup evaluation, then the official pipeline | **P11d (CAD retrieval) stages 1–2 done** ([results](results/P11d.md)); `s2c_box` criteria added (user); P11a–c planned | `sg_mnk_comp.csv`, `perclass_results.csv` |
+| P11 | Predicted instances: full pipeline on cached SoftGroup val predictions (legacy SG evaluation not reproduced, user 2026-11-04) | **P11d (CAD retrieval) stages 1–2 done** ([results](results/P11d.md)); `s2c_box` criteria added; **P11a–c, e planned** (2026-11-04) | GT instances reproduce P10b / P11d; capture rates and false positives per class |
 | P12 | Full-scale runs, Table 1 / Table 2 report, release | Planned | All rows reproduced or explained |
 
 Dependencies:
@@ -449,19 +449,34 @@ separate trunks (`siamunshared_world_comp_concat_only_emb1024`).
 
 ## P11 — Predicted instances
 
-**P11a. Legacy SoftGroup evaluation (E8), reproduced first.**
-- SoftGroup predictions (local, 96 GB, `data/objects/softgroup_preds/sg_raw`) loaded as legacy.
-- Confidence threshold: class default 0.5, `sgpreds_s2c_completion_pose.yaml` 0.3. Record which one the target CSVs used.
-- Greedy instance↔CAD overlap matching with legacy conflict resolution.
-- Legacy normalisation: ×1/(max bound + 0.5) if the bound > 0.8; mean-centred.
-- `filter_classes`; classes = CAD taxonomy names.
-- "Instance capture accuracy" (matched / total aligned CADs per catid).
-- Reports: E2 layout (`sg_mnk_comp.csv`) and E5 layout (`perclass_results.csv`).
-- Targets: 66.75 / 26.26 on 1,606; 1,602-sample E5 table; the paper SG row (76.04) once its run is identified.
+**Plan (user decisions 2026-11-04).** The legacy SoftGroup evaluation (E8) is **not** reproduced (user: only worth it if
+cached predictions save time; they are used as the instance source instead). The full pipeline runs on the cached
+SoftGroup val predictions with the models we have (no training on predicted instances: the SoftGroup train predictions,
+18 GB, are not on the DGX).
 
-**P11b. SphericalMask (gated).** Official code/checkpoint on ScanNet val; separate environment; needs P4d-val.
+- **Data on the DGX:** `legacy/data/objects/softgroup_preds/sg_raw/val/`: 313 scenes, 6.5 GB; per scene `pred_instances`
+  (RLE point masks, ScanNet20 `label_id`, `conf`) plus SoftGroup's scene arrays. Checked 2026-11-04 (scene0011_00): same
+  vertex count and order as our ScanNet `.ply` loader, and its `instance_labels` equal our instance ids, so a mask indexes
+  our points directly (SoftGroup's own `coords_float` are a rotated and shifted copy, not used). Legacy's matched cache
+  (`sg_preds_inst_pose_completion_*_val.npy`) holds GT-frame (leaky) completions and is not used.
+- **P11a. Instances.** Decode the masks; instance points from our loader, in the Scan2CAD world frame (as the pairs).
+  Confidence threshold: to measure (legacy used 0.5 / 0.3); furniture classes only.
+- **P11b. Matching for evaluation:** point-mask IoU with each S2C-C object's ScanNet instance (`relpose_cache` val objects),
+  **IoU ≥ 0.5, one-to-one**, highest IoU first. Reported: capture rate (matched / S2C-C objects, per class) and unmatched
+  predictions (false positives), separately; unmatched S2C-C objects are not failures (user, 2026-10-29).
+- **P11c. Completion:** leak-free concat CAPCM (`world` frame) on every kept predicted instance.
+- **P11d. Retrieval + pose** (below): stage 1 within the category of **SoftGroup's predicted class** (mapped to ShapeNet
+  synsets; "other furniture" searches all) **and** over all categories, both reported (class-mapped = headline); stage-2
+  re-rank with the P10b Siamese OCAM. Reference row: the **GT CAD** of the matched object (isolates the cost of retrieval
+  from the cost of segmentation).
+- **P11e. Evaluation** on the matched instances: legacy metric (box), S2C criteria (unchanged, both conventions), S2C box;
+  plus capture rate and false positives. Rows: GT instances (P10b), SoftGroup + GT CAD, SoftGroup + retrieval (class / all).
+- **SphericalMask** (the paper's best rows) stays gated: only if needed later (separate environment, ~6–10 GB).
 
-**P11c. Full pipeline.** Predicted instances → completion (`world` frame) → CAD choice → OCAM → S2C criteria (both conventions) on the predicted instances matched to S2C-C objects, reported next to the legacy protocol. The capture rate (matched / S2C-C objects) is reported separately; unmatched objects are not counted as failures (user, 2026-10-29).
+Validation gate:
+- GT instances fed through the P11 pipeline reproduce the P10b / P11d numbers.
+- Matching sanity: a GT instance mask matches its own S2C-C object with IoU 1.
+- Capture rates and false positives per class reported.
 
 **P11d. CAD choice (switch).** The legacy object–CAD matching (retrieval) module was lost and is re-implemented from
 scratch (user, 2026-10-29) with 3D-Match or a similar or better method. It completes the framework and is not a
@@ -473,7 +488,7 @@ contribution of the paper; the alignment evaluations use the GT CAD, since they 
 **P11d design (user decisions 2026-11-03), started 2026-11-03** (`caoa/retrieval/`):
 - Method: a learned joint scan–CAD embedding (after Dahnert et al. 2019; separate query and CAD encoders, each the OCAM
   sparse-conv trunk + projection, InfoNCE against the GT CAD with same-synset and random ShapeNetV2 negatives), then
-  re-ranking of the top-k by Chamfer distance with each candidate placed in the OCAM box (stage 2, to do). Chosen over
+  re-ranking of the top-k with the P10b Siamese OCAM, by the fit of each candidate placed in its box (stage 2, done). Chosen over
   3DMatch-style correspondence voting: 3DMatch is a local registration descriptor and too slow over 52k models.
 - Database: every ShapeNetV2 model (52,472 sampled; 19 cars have no `model_normalized.obj`), 2,048 points each in the
   CAD's own bounding-box frame (`scripts/build_shapenet_points.py`, cache `shapenet_points_v1`, 1.21 GiB). Search within
@@ -484,12 +499,6 @@ contribution of the paper; the alignment evaluations use the GT CAD, since they 
   top-1 and GT CADs (shape similarity; near-duplicates count) vs a random same-synset CAD.
 - Data: the `relpose_cache` pairs that have cached completions (6,663 train / 1,864 val).
 
-Validation gate:
-- Legacy SG reproduction within tolerance.
-- The GT-instance pipeline equals P8/P10.
-- Capture rates match the legacy printout.
-
-Decisions needed: retrieval protocol; SphericalMask installation.
 
 ## P12 — Full-scale experiments and report
 
