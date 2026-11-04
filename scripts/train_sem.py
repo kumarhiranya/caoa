@@ -9,9 +9,14 @@ Data: one sample per pose pair (the pair's GT CAD and its Scan2CAD `sym`), V2 cl
 (docs/results/P9.md: 2,067 val pairs -> 2,048 evaluated). Input (the change): the CAD in its own bounding-box frame
 (centred, longest side 1), 5,000 uniform surface points tiled to 8,192, `grid = coord // 1 cm`, the input OCAM and the
 retrieval feed SEM (`scripts/build_sem_embeddings.py`). Legacy trained on the CAD in its GT box frame.
-Outputs in `outputs/<name>/`: `model.pth` (plain state_dict, the legacy checkpoint format), `train_log.json`, `results.json`.
+Fix (user, 2026-11-03), switch `--bn-recalibration train` (default `none` = legacy): after training, the BatchNorm
+running statistics are recomputed on training data in eval mode (`caoa.models.sem.recalibrate_batchnorm`). Without it the
+CAD-frame model fails in eval mode, because its statistics were accumulated with drop-path on (docs/results/P9.md).
+Outputs in `outputs/<name>/`: `model.pth` (plain state_dict, the legacy checkpoint format, recalibrated if switched on),
+`train_log.json`, `results.json` (`final`: the last logged validation; `final_recalibrated` with the fix).
 
-    uv run python scripts/train_sem.py [--name sem_cad_bbox] [--max-steps 10000]
+    uv run python scripts/train_sem.py [--name sem_cad_bbox] [--max-steps 10000] [--bn-recalibration train]
+    uv run python scripts/train_sem.py --eval-only outputs/sem_cad_bbox/model.pth --bn-recalibration train
 """
 
 import argparse
@@ -28,10 +33,11 @@ from torch.utils.data import DataLoader, Dataset
 from caoa.data.legacy_sampling import sample_points
 from caoa.data.pairs import load_pairs
 from caoa.data.shapenet import load_cad_mesh, sample_uniform
-from caoa.models.sem import SEMClassifier, make_batch
+from caoa.models.sem import BN_RECALIBRATION, SEMClassifier, make_batch, recalibrate_batchnorm
 from caoa.paths import REPO_ROOT, load_paths
 
 CAD_POINTS, NUM_POINTS = 5000, 8192
+RECALIBRATION_BATCHES = 60  # x 64 training samples
 SHAPENET = None
 
 
@@ -95,6 +101,12 @@ def evaluate(model, val_loader, val_ds, device):
     }
 
 
+def recalibrate(model, train_ds, device, seed: int = 0):
+    idx = np.random.default_rng(seed).permutation(len(train_ds))[: 64 * RECALIBRATION_BATCHES]
+    batches = (make_batch([train_ds[i][0] for i in idx[s : s + 64]], device, grid="train") for s in range(0, len(idx), 64))
+    recalibrate_batchnorm(model, batches)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", default="sem_cad_bbox")
@@ -102,6 +114,8 @@ def main():
     parser.add_argument("--val-freq", type=int, default=500)
     parser.add_argument("--class-rule", default="v2")
     parser.add_argument("--workers", type=int, default=16)
+    parser.add_argument("--bn-recalibration", choices=BN_RECALIBRATION, default="none")
+    parser.add_argument("--eval-only", default=None, help="checkpoint (plain state_dict) to evaluate instead of training")
     args = parser.parse_args()
     random.seed(777)
     np.random.seed(777)
@@ -121,6 +135,15 @@ def main():
     train_loader, val_loader = loader(train_ds, 64, args.workers), loader(val_ds, 64, 4)
 
     model = SEMClassifier().to(device)
+    if args.eval_only:
+        model.load_state_dict(torch.load(args.eval_only, map_location=device))
+        results = {"final": evaluate(model, val_loader, val_ds, device), "class_rule": args.class_rule, "checkpoint": args.eval_only}
+        if args.bn_recalibration == "train":
+            recalibrate(model, train_ds, device)
+            results["final_recalibrated"] = evaluate(model, val_loader, val_ds, device)
+        print(json.dumps({k: v for k, v in results.items() if k.startswith("final")}, indent=1))
+        (out_dir / "results_eval_only.json").write_text(json.dumps(results, indent=1))
+        return
     opt = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-3)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(opt, T_max=args.max_steps, eta_min=1e-6)
     bce = torch.nn.BCELoss()
@@ -149,8 +172,13 @@ def main():
                 print(f"[val] step {step}  acc {res['accuracy']:.4f} F1 {res['macro_f1']:.4f} (n {res['n']})  "
                       f"all: acc {res['accuracy_all']:.4f} F1 {res['macro_f1_all']:.4f}", flush=True)
                 (out_dir / "train_log.json").write_text(json.dumps(log))
+    results = {"final": log["val"][-1], "class_rule": args.class_rule, "bn_recalibration": args.bn_recalibration}
+    if args.bn_recalibration == "train":
+        recalibrate(model, train_ds, device)
+        results["final_recalibrated"] = evaluate(model, val_loader, val_ds, device)
+        print(f"[val] recalibrated  acc {results['final_recalibrated']['accuracy']:.4f} F1 {results['final_recalibrated']['macro_f1']:.4f}", flush=True)
     torch.save(model.state_dict(), out_dir / "model.pth")
-    (out_dir / "results.json").write_text(json.dumps({"final": log["val"][-1], "class_rule": args.class_rule}, indent=1))
+    (out_dir / "results.json").write_text(json.dumps(results, indent=1))
 
 
 if __name__ == "__main__":

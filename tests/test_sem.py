@@ -55,3 +55,29 @@ def test_legacy_sem_checkpoint_reproduces_legacy_embeddings():
     cos = (ours * ref).sum(1) / np.linalg.norm(ours, axis=1) / np.linalg.norm(ref, axis=1)
     assert cos.min() > 0.99
     np.testing.assert_array_equal(out["probs"].argmax(1).cpu().numpy(), np.stack([legacy[k][0] for k in keys]).argmax(1))
+
+
+def test_recalibrate_batchnorm_matches_eval_mode_activations():
+    """The recalibrated statistics are the plain mean / variance of what eval mode feeds each BatchNorm (dropout off)."""
+    from torch import nn
+
+    from caoa.models.sem import recalibrate_batchnorm
+
+    class Toy(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.drop, self.bn = nn.Dropout(0.5), nn.BatchNorm1d(4)
+
+        def forward(self, b):
+            return self.bn(self.drop(b["x"]))
+
+    torch.manual_seed(0)
+    model = Toy()
+    batches = [{"x": torch.randn(32, 4) * 3 + 1} for _ in range(5)]
+    model.bn.running_var.fill_(100.0)
+    recalibrate_batchnorm(model, batches)
+    x = torch.cat([b["x"] for b in batches])
+    torch.testing.assert_close(model.bn.running_mean, x.mean(0), atol=1e-5, rtol=1e-5)
+    per_batch_var = torch.stack([b["x"].var(0) for b in batches]).mean(0)  # momentum None: mean of per-batch unbiased variances
+    torch.testing.assert_close(model.bn.running_var, per_batch_var, atol=1e-4, rtol=1e-4)
+    assert not model.training and model.bn.momentum == 0.1

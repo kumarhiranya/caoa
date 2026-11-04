@@ -54,7 +54,7 @@ Read these before working:
   is framework completion only; evaluations use the GT CAD.
 - **P7 extension done** (concat 44.42 vs 45.37; context 22.18 vs 22.47). **P10 done** (2026-11-03, `docs/results/P10.md`):
   best OCAM = Siamese with separate trunks + SEM, legacy loss and schedule (83.80); the paper's shared trunk, loss and
-  schedule don't help. **P9:** SEM retraining diagnosed (eval-mode BatchNorm / drop-path); legacy checkpoint kept. **P11d**
+  schedule don't help. **P9 done** (2026-11-04): SEM retraining reproduces legacy with the BatchNorm recalibration fix (`--bn-recalibration train`); legacy checkpoint kept. **P11d**
   CAD retrieval stages 1–2 done (`docs/results/P11d.md`), with the CAD-independent `s2c_box` criteria (user).
   Leaky numbers are no longer shown (user, 2026-11-03).
 - If anything is still committed from the workstation, `git pull --rebase` before pushing.

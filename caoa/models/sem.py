@@ -106,3 +106,26 @@ def make_batch(clouds: list[np.ndarray], device, voxel_size: float = VOXEL_SIZE,
 def load_legacy_sem(model: SEMClassifier, path) -> None:
     """Legacy checkpoints are a plain `state_dict` (`torch.save(model.state_dict())`)."""
     model.load_state_dict(torch.load(path, map_location="cpu", weights_only=False), strict=True)
+
+
+BN_RECALIBRATION = ("none", "train")
+
+
+@torch.no_grad()
+def recalibrate_batchnorm(model: nn.Module, batches) -> None:
+    """Fix (P9, user 2026-11-03; switch `bn_recalibration: train`): recompute every BatchNorm's running statistics as the
+    plain average over `batches` (input dicts), with everything else in eval mode (no dropout, no drop-path, fixed
+    serialization orders), so they match the activations eval mode produces. Legacy keeps the statistics from training,
+    which were accumulated with drop-path on; a SEM trained on CAD-frame inputs then fails in eval mode (docs/results/P9.md)."""
+    model.eval()
+    bns = [m for m in model.modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)]
+    momenta = [m.momentum for m in bns]
+    for m in bns:
+        m.reset_running_stats()
+        m.momentum = None  # cumulative average
+        m.train()
+    for b in batches:
+        model(b)
+    for m, mom in zip(bns, momenta):
+        m.momentum = mom
+    model.eval()
