@@ -335,7 +335,7 @@ Code written and tested (not yet run at scale):
   - `caoa/data/completion_dataset.py` (S2C-C, approved fixes 1/3/4) and `scripts/build_completion_cache.py`.
     - Size estimate: **~2.1 GiB as float64 (legacy), ~1.1 GiB as float32**, for 4,308 pairs (2,564 train / 1,744 val = 1,864 minus the non-VALID classes).
   - `caoa/data/snindoor_dataset.py`: the crop matches legacy exactly under the same seed.
-  - Open: 91 of the 4,308 S2C-C pairs use CADs that are missing from `semantic_embeddings.npy` (fix 3), asked 2026-10-21.
+  - ~~Open: 91 of the 4,308 S2C-C pairs use CADs that are missing from `semantic_embeddings.npy` (fix 3).~~ **Closed 2026-11-03: no effect.** Only `UpTransv2` reads the embedding; every reported CAPCM is UpTrans, and our port has no semantic input. Legacy's two `UpTransv2` runs (Mar 4 2025; S2C-C to epoch 90, concat to epoch 9) were never tested, reported or used for pose. The file is healthy (21,499 CADs of SN-Indoor's 7 categories, 512-d, mean cosine 0.37); the 91 missing are displays and trash bins, outside those categories. Rebuilding it would change nothing.
 - **P6:**
   - `caoa/models/{pointops,chamfer,odgnet}.py`: the UpTrans port reproduces the legacy model's outputs exactly on the same weights (with and without context); every local UpTrans checkpoint loads strictly.
   - `caoa/eval/completion_metrics.py`: F-Score / CDL1 / CDL2 and the `validate()` / `test()` aggregations match legacy exactly.
@@ -402,7 +402,7 @@ Validation gate:
 - Leak quantified.
 - All reports: legacy (E2/E3), S2C criteria (formerly matched-only).
 
-Decision needed: how leaky legacy numbers are presented.
+**Decided (user, 2026-11-03): leaky numbers are no longer shown** in results going forward, since the leak is fixed; they stay in `results/P8.md` as the record of the legacy reproduction.
 
 ## P9 — SEM + legacy symmetry evaluation
 
