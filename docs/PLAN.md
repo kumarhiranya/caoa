@@ -58,7 +58,7 @@ Last updated: 2026-10-28 (P8 leak quantified and fixed; P9 port done, legacy SEM
 | P7 | CAPCM training: **S2C-C only** (user, 2026-10-21), **on the DGX**; extended to concat and context | **Done** ([results](results/P7.md)): test CDL1 45.00 vs 46.80; accepted by the user 2026-10-27. Concat 44.42 vs 45.37; context best val 22.18 vs 22.47 (2026-10-29) | Val curve vs `results/legacy_curves/s2ccompletion_upTransb1_val.csv`; ckpt-best test CDL1 vs 46.80 |
 | P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Legacy reproduction done; leak quantified and fixed** ([results](results/P8.md)): 87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3; leak-free completion-only 82.6–83.1 (−4), inst+comp 80.9–81.8 (≤ −1.3); emb 512 / 256 leak-free 81.9 / 80.4 | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | **Port done** ([results](results/P9.md)); legacy `embeddings.npy` degenerate (wrong export inputs), regenerated (`cad_bbox`, user 2026-10-28); retraining open | 95.8% accuracy; legacy embeddings reproduced |
-| P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | **P10a–c done** ([results](results/P10.md)): SEM +1.1; Siamese separate trunks 83.8 (S2C criteria 83.4, best), shared 80.4; paper loss (P10c) 82.9, no gain; P10d planned | Ablation deltas under the legacy metric + S2C criteria |
+| P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | **Done** (2026-11-03, [results](results/P10.md)): best = Siamese with separate trunks, legacy loss and schedule: 83.80 legacy, S2C criteria 83.4 / 78.6, box 85.0 / 81.2 (baseline 83.05 / 80.6 / 81.8). SEM helps (+1.1); shared trunk (80.4), paper loss (82.9) and paper schedule (81.2) don't | Ablation deltas under the legacy metric + S2C criteria; unit tests incl. 32-sample overfit |
 | P11 | Predicted instances: legacy SoftGroup evaluation, then the official pipeline | **P11d (CAD retrieval) stages 1–2 done** ([results](results/P11d.md)); `s2c_box` criteria added (user); P11a–c planned | `sg_mnk_comp.csv`, `perclass_results.csv` |
 | P12 | Full-scale runs, Table 1 / Table 2 report, release | Planned | All rows reproduced or explained |
 
@@ -443,7 +443,9 @@ Validation gate:
 
 **Status (2026-11-03, [results](results/P10.md)).** P10a (SEM, leak-free) 84.7 / 84.17; P10b separate trunks 84.1 / 83.80
 (S2C criteria −center 83.4, the best leak-free run), shared trunk 79.2 / 80.36. P10c (separate trunks + t2/r3/s2 +
-5 × Chamfer, CAD-at-pred vs CAD-at-GT, user option 1) running; P10d (paper schedule: wd 1e-4, 150 epochs ≈ 15.6k steps) next.
+5 × Chamfer, CAD-at-pred vs CAD-at-GT, user option 1) 82.89 final; P10d (+ paper schedule: wd 1e-4, 150 epochs = 15,750 steps)
+81.22 final. **Gate passed 2026-11-03:** unit tests incl. the 32-sample overfit (both variants, paper loss). Best model: P10b,
+separate trunks (`siamunshared_world_comp_concat_only_emb1024`).
 
 ## P11 — Predicted instances
 

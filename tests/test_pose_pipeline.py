@@ -200,3 +200,36 @@ def test_siamese_forward_backward(val_pairs, shared):
     if not shared:
         for trunk in (model.obj, model.cad):
             assert next(trunk.conv4.parameters()).grad.abs().sum() > 0
+
+
+@needs_cuda
+@needs_pairs
+@pytest.mark.parametrize("shared", [True, False])
+def test_siamese_overfits_32_samples(val_pairs, shared):
+    """P10 gate: the Siamese OCAM with the paper's loss (t2 / r3 / s2 L1 + 5 x Chamfer) fits 32 fixed samples
+    (legacy metric ~100%)."""
+    from caoa.eval import legacy_report
+    from caoa.models.ocam import OCAMSiamese
+    from caoa.models.pose_losses import chamfer_pose_loss
+
+    torch.manual_seed(0)
+    np.random.seed(0)
+    pairs = val_pairs[:32]
+    ds = ObjectPoseDataset(pairs, train=False, cad_points=_fake_cad_points(pairs))
+    batch = collate([ds[i] for i in range(len(ds))])
+    model = OCAMSiamese(embedding=256, shared=shared).cuda()
+    inputs = [batch[k].cuda() for k in ("coords", "feats", "batch")] + [batch["batch_size"]] + [batch[k].cuda() for k in ("cad_coords", "cad_feats", "cad_batch")]
+    target, unit = batch["target"].cuda(), batch["cad_unit"].cuda()
+    opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
+    w = torch.tensor([2.0] * 3 + [3.0] * 9 + [2.0] * 3, device="cuda")
+    for _ in range(400):
+        pred = model(*inputs)
+        loss = ((pred - target).abs() * w).sum() / len(pairs) + 5 * chamfer_pose_loss(pred, target, unit)
+        opt.zero_grad()
+        loss.backward()
+        opt.step()
+    model.eval()
+    with torch.no_grad():
+        pred = model(*inputs).cpu().numpy()
+    report = legacy_report.eval_pose_report(pred, batch["target"].numpy(), [p.sym for p in pairs], [p.sem_name for p in pairs])
+    assert report["avg"]["total_acc"] >= 0.9
