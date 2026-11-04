@@ -59,7 +59,7 @@ Last updated: 2026-10-28 (P8 leak quantified and fixed; P9 port done, legacy SEM
 | P8 | OCAM + completion: legacy reproduction, then the leak-free mode | **Legacy reproduction done; leak quantified and fixed** ([results](results/P8.md)): 87.8 / 81.9 / 85.6 / 82.7 vs 87.8 / 81.3 / 85.0 / 81.3; leak-free completion-only 82.6–83.1 (−4), inst+comp 80.9–81.8 (≤ −1.3); emb 512 / 256 leak-free 81.9 / 80.4 | `pose_mnk` logs, `comp.csv` / `compinst.csv` |
 | P9 | SEM: PTv3 symmetry classifier + legacy `eval_sym` | **Done** (2026-11-04, [results](results/P9.md)): port parity; legacy `embeddings.npy` degenerate, regenerated (`cad_bbox`); E11 sample set = V2 rule (95.26 vs 95.80, accepted); retraining matches legacy on unseen CADs (91.1) with the BatchNorm fix; legacy checkpoint kept | 95.8% accuracy; legacy embeddings reproduced |
 | P10 | OCAM paper model: symmetry embedding, Siamese CAD+object, Eq. 5 loss | **Done** (2026-11-03, [results](results/P10.md)): best = Siamese with separate trunks, legacy loss and schedule: 83.80 legacy, S2C criteria 83.4 / 78.6, box 85.0 / 81.2 (baseline 83.05 / 80.6 / 81.8). SEM helps (+1.1); shared trunk (80.4), paper loss (82.9) and paper schedule (81.2) don't | Ablation deltas under the legacy metric + S2C criteria; unit tests incl. 32-sample overfit |
-| P11 | Predicted instances: full pipeline on cached SoftGroup val predictions (legacy SG evaluation not reproduced, user 2026-11-04) | **P11d (CAD retrieval) stages 1–2 done** ([results](results/P11d.md)); `s2c_box` criteria added; **P11a–c, e planned** (2026-11-04) | GT instances reproduce P10b / P11d; capture rates and false positives per class |
+| P11 | Predicted instances: full pipeline on cached SoftGroup val predictions (legacy SG evaluation not reproduced, user 2026-11-04) | **Done** (2026-11-04, [results](results/P11.md), [retrieval](results/P11d.md)): capture 78.0% at conf ≥ 0.3; on matched instances, SoftGroup + retrieval 82.9 legacy / 84.2 box vs SoftGroup + GT CAD 83.4 / 85.0 vs GT instances 86.3 / 86.7 | GT instances reproduce P10b / P11d; capture rates and false positives per class |
 | P12 | Full-scale runs, Table 1 / Table 2 report, release | Planned | All rows reproduced or explained |
 
 Dependencies:
@@ -472,6 +472,8 @@ SoftGroup val predictions with the models we have (no training on predicted inst
 - **P11e. Evaluation** on the matched instances: legacy metric (box), S2C criteria (unchanged, both conventions), S2C box;
   plus capture rate and false positives. Rows: GT instances (P10b), SoftGroup + GT CAD, SoftGroup + retrieval (class / all).
 - **SphericalMask** (the paper's best rows) stays gated: only if needed later (separate environment, ~6–10 GB).
+
+**Outcome (2026-11-04, [results](results/P11.md)): gate passed.** `scripts/run_p11.py`; capture 78.0% (conf ≥ 0.3); segmentation costs ~3 legacy points, retrieval with re-ranking ~0.5.
 
 Validation gate:
 - GT instances fed through the P11 pipeline reproduce the P10b / P11d numbers.

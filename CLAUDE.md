@@ -33,7 +33,7 @@ Read these before working:
 8. **Process:** every phase ends with a validation gate. Write a results note in `docs/results/`, update
    PLAN.md, and commit after the phase passes (WIP commits are OK). Don't commit `cache/` or `outputs/`.
 
-## Status (2026-11-03)
+## Status (2026-11-04)
 
 - **Done:** P0–P3b (data layer, legacy and official metrics, OCAM on spconv, legacy evaluation parity),
   P6 (UpTrans port; re-scored legacy checkpoints within 0.07%). P4/P5: code done and caches built.
@@ -57,6 +57,8 @@ Read these before working:
   schedule don't help. **P9 done** (2026-11-04): SEM retraining reproduces legacy with the BatchNorm recalibration fix (`--bn-recalibration train`); legacy checkpoint kept. **P11d**
   CAD retrieval stages 1–2 done (`docs/results/P11d.md`), with the CAD-independent `s2c_box` criteria (user).
   Leaky numbers are no longer shown (user, 2026-11-03).
+- **P11 done** (2026-11-04, `docs/results/P11.md`): full pipeline on the cached SoftGroup val predictions (`scripts/run_p11.py`):
+  capture 78.0%; SoftGroup + retrieval 82.9 legacy vs SoftGroup + GT CAD 83.4 vs GT instances 86.3 (matched objects). Next: P12.
 - If anything is still committed from the workstation, `git pull --rebase` before pushing.
 
 ## Data on the DGX
