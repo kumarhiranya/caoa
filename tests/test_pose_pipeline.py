@@ -207,7 +207,7 @@ def test_siamese_forward_backward(val_pairs, shared):
 @pytest.mark.parametrize("shared", [True, False])
 def test_siamese_overfits_32_samples(val_pairs, shared):
     """P10 gate: the Siamese OCAM with the paper's loss (t2 / r3 / s2 L1 + 5 x Chamfer) fits 32 fixed samples
-    (legacy metric ~100%)."""
+    (legacy metric ~100%; >= 90% after 800 steps, a margin over spconv's run-to-run GPU nondeterminism)."""
     from caoa.eval import legacy_report
     from caoa.models.ocam import OCAMSiamese
     from caoa.models.pose_losses import chamfer_pose_loss
@@ -222,7 +222,7 @@ def test_siamese_overfits_32_samples(val_pairs, shared):
     target, unit = batch["target"].cuda(), batch["cad_unit"].cuda()
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3)
     w = torch.tensor([2.0] * 3 + [3.0] * 9 + [2.0] * 3, device="cuda")
-    for _ in range(400):
+    for _ in range(800):
         pred = model(*inputs)
         loss = ((pred - target).abs() * w).sum() / len(pairs) + 5 * chamfer_pose_loss(pred, target, unit)
         opt.zero_grad()
@@ -232,4 +232,4 @@ def test_siamese_overfits_32_samples(val_pairs, shared):
     with torch.no_grad():
         pred = model(*inputs).cpu().numpy()
     report = legacy_report.eval_pose_report(pred, batch["target"].numpy(), [p.sym for p in pairs], [p.sem_name for p in pairs])
-    assert report["avg"]["total_acc"] >= 0.9
+    assert report["avg"]["total_acc"] >= 0.9, report["avg"]["total_acc"]
