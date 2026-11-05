@@ -504,15 +504,31 @@ contribution of the paper; the alignment evaluations use the GT CAD, since they 
 
 ## P12 — Full-scale experiments and report
 
-- Requires P4d (all 1,513 scenes). Rebuild the caches; 3 seeds per configuration.
-- `scripts/report.py` produces:
-  - every legacy layout (E2/E3/E5/E8/E9/E11);
-  - Table 1 in the paper's grouping (validated in P3b.5);
-  - the S2C criteria (both conventions) and the CAD-independent `s2c_box` on the evaluated S2C-C objects (user, 2026-10-29 / 11-03);
-  - Table 2;
-  - baselines from the original papers.
-- `docs/RESULTS.md`: every paper number next to ours; each deviation traced to the issue register.
-- README and reproduction steps.
+**Scope (user decisions 2026-11-04):**
+- **Seeds:** 3 seeds (777 = the original runs, 778, 779) for the whole P10 ablation (leak-free concat completion-only):
+  baseline (`world_comp_concat_only_emb1024`), + SEM (`semcad_world_…`), Siamese shared (`siamshared_world_…`), Siamese
+  separate (`siamunshared_world_…`), + paper loss (`chamfer_siamunshared_world_…`), + paper schedule
+  (`paperschedule_chamfer_siamunshared_world_…`). Configs: `configs/pose/seeds/<config>_seed{778,779}.yaml`. Run what fits in
+  each Slurm job; RESULTS.md reports mean ± std where 3 seeds exist and marks single-seed numbers.
+- **SphericalMask ("Sph" rows of Table 1):** marked "not reproduced, pending"; to be taken up in a fresh job.
+- **Deliverables:** `docs/RESULTS.md` (every paper number next to ours, deviations traced to the issue register), README,
+  `scripts/report.py` (regenerates every table from `outputs/`), and released checkpoints (completion, retrieval, OCAM,
+  SEM; location and size to agree).
+- Data: the caches already cover the full data (P4d done; only `scene0212_00` is missing).
+
+**Seed runs (status):**
+
+| Config | seed 778 | seed 779 |
+|---|---|---|
+| baseline `world_comp_concat_only_emb1024` | running (job 134281, 2026-11-04, GPU 1) | **to run** |
+| + SEM `semcad_world_comp_concat_only_emb1024` | queued (job 134281, GPU 1, after the baseline) | **to run** |
+| Siamese separate `siamunshared_world_comp_concat_only_emb1024` | running (job 134281, GPU 0) | **to run** |
+| Siamese shared `siamshared_world_comp_concat_only_emb1024` | **to run** | **to run** |
+| + paper loss `chamfer_siamunshared_world_comp_concat_only_emb1024` | **to run** | **to run** |
+| + paper schedule `paperschedule_chamfer_siamunshared_world_comp_concat_only_emb1024` | **to run** | **to run** |
+
+Run one with `CUDA_VISIBLE_DEVICES=<g> uv run python scripts/train_pose.py configs/pose/seeds/<config>_seed<s>.yaml`
+(times on an A100: baseline and + SEM ~2.8 h, Siamese ~5.2 h, paper schedule ~4 h).
 
 Validation gate: every paper row is reproduced within tolerance, or has a user-accepted explanation.
 
