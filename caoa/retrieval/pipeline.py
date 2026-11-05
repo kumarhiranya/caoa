@@ -177,6 +177,7 @@ def evaluate_selections(pairs, cols, pred, target, nscale, noff, scores, annos, 
     for name, c in choice.items():
         P, T = pred[qi, c].numpy(), target[qi, 0].numpy()
         legacy = legacy_report.eval_pose_report(P, T, syms, labels)["avg"]
+        table1 = legacy_report.eval_pose_report(P, T, syms, groupings.class_labels(pairs, "table1"))["per_class"]["total"]
         centers, rotations, extents = to_world(P, nscale[qi, c].numpy(), noff[qi, c].numpy())
         chosen = [cols[i][c[i]] for i in qi]
         ok = {conv: [] for conv in scan2cad_benchmark.CONVENTIONS}
@@ -199,6 +200,7 @@ def evaluate_selections(pairs, cols, pred, target, nscale, noff, scores, annos, 
             "category_acc": float(np.mean([chosen[i].split("_", 1)[0] == p.catid_cad for i, p in enumerate(pairs)])),
             "cd_l1_to_gt": float(cd.mean()),
             "legacy_total_acc": legacy["total_acc"], "legacy_q_acc": legacy["q_acc"], "legacy_s_acc": legacy["s_acc"],
+            "legacy_table1": {"micro": table1["micro_avg"], "macro": table1["macro_avg"]},  # Paper Table 1's grouping
             "s2c_criteria": crit,
             "s2c_box": box_criteria.evaluate_boxes(pairs, centers, rotations, extents, annos),
         }

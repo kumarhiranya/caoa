@@ -512,7 +512,7 @@ contribution of the paper; the alignment evaluations use the GT CAD, since they 
   each Slurm job; RESULTS.md reports mean ± std where 3 seeds exist and marks single-seed numbers.
 - **SphericalMask ("Sph" rows of Table 1):** marked "not reproduced, pending"; to be taken up in a fresh job.
 - **Deliverables:** `docs/RESULTS.md` (every paper number next to ours, deviations traced to the issue register), README,
-  `scripts/report.py` (regenerates every table from `outputs/`), and released checkpoints (completion, retrieval, OCAM,
+  `scripts/report.py` (done: regenerates every table from `outputs/` into `docs/results/tables.md`), and released checkpoints (completion, retrieval, OCAM,
   SEM; location and size to agree).
 - Data: the caches already cover the full data (P4d done; only `scene0212_00` is missing).
 
@@ -526,6 +526,9 @@ contribution of the paper; the alignment evaluations use the GT CAD, since they 
 | Siamese shared `siamshared_world_comp_concat_only_emb1024` | **to run** | **to run** |
 | + paper loss `chamfer_siamunshared_world_comp_concat_only_emb1024` | **to run** | **to run** |
 | + paper schedule `paperschedule_chamfer_siamunshared_world_comp_concat_only_emb1024` | **to run** | **to run** |
+
+Also for the next job: re-run `scripts/run_p11.py` (~15 min) so the SoftGroup rows get the Table 1 grouping
+(`legacy_table1`, added to `caoa/retrieval/pipeline.py` on 2026-11-04), then `scripts/report.py`.
 
 Run one with `CUDA_VISIBLE_DEVICES=<g> uv run python scripts/train_pose.py configs/pose/seeds/<config>_seed<s>.yaml`
 (times on an A100: baseline and + SEM ~2.8 h, Siamese ~5.2 h, paper schedule ~4 h).
