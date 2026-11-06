@@ -1,4 +1,5 @@
-"""P11: the full pipeline on the cached SoftGroup val predictions (user decisions 2026-11-04; docs/PLAN.md § P11).
+"""P11: the full pipeline on predicted instances (user decisions 2026-11-04; docs/PLAN.md § P11): the cached SoftGroup
+val predictions (`--instances softgroup`) or our SphericalMask run (`--instances sphericalmask`).
 
 1. Instances (`caoa.data.softgroup`): every predicted instance of a kept class (not door / window / picture / curtain /
    shower curtain), points from our ScanNet loader in the Scan2CAD world frame.
@@ -12,9 +13,9 @@
    (`class_synsets`, from the train pairs; "otherfurniture" and unmapped classes search all) and over all synsets;
    stage 2 with the P10b Siamese OCAM.
 5. Rows: GT instances + GT CAD on the same objects; SoftGroup + GT CAD; SoftGroup + retrieval (class-mapped / all).
-Output: `outputs/p11_softgroup/` (`results.json`, `matching.json`, `class_synsets.json`).
+Output: `outputs/p11_<instances>/` (`results.json`, `matching.json`, `class_synsets.json`).
 
-    uv run python scripts/run_p11.py [--conf 0.3] [--k 10]
+    uv run python scripts/run_p11.py [--instances softgroup] [--conf 0.3] [--k 10]
 """
 
 import argparse
@@ -34,7 +35,7 @@ from caoa.data.pairs import load_pairs
 from caoa.data.pose_completion import MIN_POINTS, complete, load_pose_completions, to_canonical
 from caoa.data.scannet import dominant_label
 from caoa.data.shapenet import load_shapenet_points
-from caoa.data.softgroup import EXCLUDED_CLASSES, INSTANCE_CLASSES, load_scene_instances, match_instances, sg_pred_path
+from caoa.data.softgroup import EXCLUDED_CLASSES, INSTANCE_CLASSES, INSTANCE_SOURCES, load_scene_instances, match_instances, pred_dir, sg_pred_path
 from caoa.eval.scan2cad_benchmark import category_name
 from caoa.models.odgnet import UpTrans, load_legacy_checkpoint
 from caoa.paths import REPO_ROOT, load_paths
@@ -69,7 +70,7 @@ def class_synsets(train_pairs, coverage: float = 0.95) -> dict[str, list[str]]:
 
 def scene_job(scene_id):
     paths, annos, pairs_by_scene = CTX["paths"], CTX["annos"], CTX["pairs_by_scene"]
-    instances, scene = load_scene_instances(paths.scannet_scans, paths.legacy_repo, scene_id, annos[scene_id])
+    instances, scene = load_scene_instances(paths.scannet_scans, CTX["preds"], scene_id, annos[scene_id])
     instances = [i for i in instances if i.label not in EXCLUDED_CLASSES]
     objects = pairs_by_scene.get(scene_id, [])
     gt_masks = [scene.instance == p.instance_id for p in objects]
@@ -94,6 +95,7 @@ def scene_job(scene_id):
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument("--instances", choices=INSTANCE_SOURCES, default="softgroup")
     parser.add_argument("--conf", type=float, default=0.3)
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--yaws", type=int, default=8)
@@ -101,12 +103,16 @@ def main():
     parser.add_argument("--pose", default="siamunshared_world_comp_concat_only_emb1024")
     parser.add_argument("--workers", type=int, default=20)
     parser.add_argument("--limit", type=int, default=0, help="first N scenes only (smoke test)")
+    parser.add_argument("--tag", default="", help="output folder suffix: outputs/p11_<instances><tag>")
+    parser.add_argument("--restrict-to", default=None, help="another P11 output folder: evaluate only the S2C-C objects matched "
+                        "there too (common object set for comparing instance sources)")
     parser.add_argument("--matching-only", action="store_true", help="stop after the capture / detection statistics")
     args = parser.parse_args()
     assert args.conf in CONF_THRESHOLDS
     paths = load_paths()
     device = torch.device("cuda")
-    out_dir = REPO_ROOT / "outputs" / "p11_softgroup"
+    out_dir = REPO_ROOT / "outputs" / f"p11_{args.instances}{args.tag}"
+    preds = pred_dir(paths.legacy_repo, args.instances)
     out_dir.mkdir(parents=True, exist_ok=True)
     rcfg = yaml.safe_load(open(REPO_ROOT / "outputs" / args.retrieval / "config.yaml"))
     pcfg = yaml.safe_load(open(REPO_ROOT / "outputs" / args.pose / "config.yaml"))
@@ -118,10 +124,10 @@ def main():
     pairs_by_scene = defaultdict(list)
     for p in val_pairs:
         pairs_by_scene[p.scene_id].append(p)
-    scenes = sorted(s for s in annos if scannet_split(s) == "val" and sg_pred_path(paths.legacy_repo, s).exists())
+    scenes = sorted(s for s in annos if scannet_split(s) == "val" and sg_pred_path(preds, s).exists())
     if args.limit:
         scenes = scenes[: args.limit]
-    CTX.update(paths=paths, annos=annos, pairs_by_scene=pairs_by_scene)
+    CTX.update(paths=paths, annos=annos, pairs_by_scene=pairs_by_scene, preds=preds)
     with Pool(args.workers) as pool:
         per_scene = pool.map(scene_job, scenes, chunksize=1)
     n_objects = sum(len(r[2]) for r in per_scene)
@@ -159,14 +165,23 @@ def main():
         print(f"conf >= {t}: capture {m['capture']:.4f} ({m['n_matched']}/{m['n_objects']}), predictions {m['n_predictions']}, "
               f"not S2C-C {m['false_positives']}, mean IoU {m['iou_mean']:.3f} | detection vs ScanNet: precision {prec:.3f} "
               f"recall {rec:.3f} F1 {m['detection']['f1']:.3f}")
+    matched_at_conf = sorted([list(objs[j]) for _, _, objs, per_conf, _, _ in per_scene for j, _ in per_conf[args.conf].values()])
+    matching["matched_objects"] = {"conf": args.conf, "objects": matched_at_conf}  # [scene_id, model_index]
     (out_dir / "matching.json").write_text(json.dumps(matching, indent=1))
     if args.matching_only:
         return
 
     # matched instances at --conf, as pairs: the instance's points, evaluated against the matched object
+    keep = None
+    if args.restrict_to:
+        other = json.loads((REPO_ROOT / args.restrict_to / "matching.json").read_text())["matched_objects"]
+        assert other["conf"] == args.conf, f"{args.restrict_to} matched at conf {other['conf']}"
+        keep = {tuple(o) for o in other["objects"]}
     sg_pairs, labels, gt_pairs = [], [], []
     for _, insts, objs, per_conf, _, _ in per_scene:
         for k, (j, _) in sorted(per_conf[args.conf].items()):
+            if keep is not None and tuple(objs[j]) not in keep:
+                continue
             gt = pair_of[objs[j]]
             inst = insts[k]
             sg_pairs.append(dataclasses.replace(gt, points=inst.points, colors=np.zeros((len(inst.points), 3), np.uint8)))
@@ -175,9 +190,11 @@ def main():
     print(f"evaluating {len(sg_pairs)} matched instances (conf >= {args.conf})")
 
     # 3: completion, leak-free (world frame), stored in the pair's storage frame as the pose caches
-    odgnet = paths.legacy_repo / "ODGNet"
-    capcm = UpTrans.from_config(yaml.safe_load(open(odgnet / CAPCM / "config.yaml"))["model"]).to(device).eval()
-    load_legacy_checkpoint(capcm, odgnet / CAPCM / "ckpt-best.pth")
+    # the CAPCM behind the pose config's completion cache: its `checkpoint` (our run dir), else the legacy concat run
+    capcm_dir = REPO_ROOT / pcfg["data"]["completion"]["checkpoint"] if pcfg["data"]["completion"].get("checkpoint") \
+        else paths.legacy_repo / "ODGNet" / CAPCM
+    capcm = UpTrans.from_config(yaml.safe_load(open(capcm_dir / "config.yaml"))["model"]).to(device).eval()
+    print(f"CAPCM {capcm_dir} (epoch {load_legacy_checkpoint(capcm, capcm_dir / 'ckpt-best.pth')['epoch']})")
     np.random.seed(0)
     world = complete(capcm, [tile_to_min(p.points.astype(np.float64), MIN_POINTS) for p in sg_pairs], device)
     sg_comp = {(p.scene_id, p.model_index): to_canonical(p, c) for p, c in zip(sg_pairs, world)}
@@ -205,16 +222,16 @@ def main():
     cols = {mode: [[keys[j] for j in row] + [cad_key(p)] for row, p in zip(top, sg_pairs)] for mode, top in tops.items()}
     cand_keys = {key for c in cols.values() for row in c for key in row}
     print(f"{len(cand_keys)} unique candidate CADs")
-    cad_points, sym_embeddings, cad_box = pipeline.prepare_candidates(cand_keys, paths, device, args.workers)
+    cad_points, sym_embeddings, cad_box = pipeline.prepare_candidates(cand_keys, paths, device, args.workers, pcfg["model"].get("sym_embedding"))
     ocam = pipeline.load_ocam(pcfg, REPO_ROOT / "outputs" / args.pose / "model_final.pth", device)
 
-    results = {"conf": args.conf, "k": args.k, "n_matched": len(sg_pairs), "matching": matching}
+    results = {"conf": args.conf, "k": args.k, "n_matched": len(sg_pairs), "matching": matching, "restrict_to": args.restrict_to}
     gt_cols = [[cad_key(p), cad_key(p)] for p in gt_pairs]  # GT instances, GT CAD only
     out = pipeline.align(gt_pairs, gt_comp, gt_cols, pcfg, ocam, cad_points, sym_embeddings, device)
     results["gt_instances"] = pipeline.evaluate_selections(gt_pairs, gt_cols, *out, annos, cad_box, db_points, db_index, ["gt_cad"])
     for mode in ("class", "all"):
         out = pipeline.align(sg_pairs, sg_comp, cols[mode], pcfg, ocam, cad_points, sym_embeddings, device)
-        results[f"softgroup_{mode}"] = pipeline.evaluate_selections(sg_pairs, cols[mode], *out, annos, cad_box, db_points, db_index)
+        results[f"{args.instances}_{mode}"] = pipeline.evaluate_selections(sg_pairs, cols[mode], *out, annos, cad_box, db_points, db_index)
     for row, res in results.items():
         if isinstance(res, dict) and row not in ("matching",):
             for name, r in res.items():

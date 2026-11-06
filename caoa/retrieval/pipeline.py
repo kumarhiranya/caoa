@@ -30,11 +30,10 @@ from caoa.eval.pose_eval import to_world
 from caoa.models.chamfer import nn_squared_distances
 from caoa.models.ocam import OCAMSiamese
 from caoa.models.pose_losses import box_points
-from caoa.models.sem import SEMClassifier, load_legacy_sem, make_batch
+from caoa.models.sem import SEMClassifier, load_legacy_sem, make_batch, sem_checkpoint
 from caoa.retrieval import search
 from caoa.retrieval.data import cad_key, world_completion
 
-SEM_RUN = "S2Csym_emb128_bce_vox1cm_wd1e-03_b64_lr1e-04_bbcls-ptv3-v1m1-0-shapenet_v2_mini_ptv3cls_softmax_symbinary_cad_bce_adam_cosineannealing"
 CAD_POINTS, SEM_POINTS, SEM_INPUT = 8192, 5000, 8192
 SCORE_POINTS = 2048
 SHAPENET = None
@@ -86,14 +85,15 @@ def stage1(rmodel, queries: np.ndarray, db_emb: torch.Tensor, allowed: torch.Ten
     return sim.topk(k, dim=1).indices.cpu().numpy()
 
 
-def prepare_candidates(keys, paths, device, workers: int = 20):
-    """{key: 8,192 bbox-frame points}, {key: SEM embedding}, {key: (mesh box centre, half extents)}."""
+def prepare_candidates(keys, paths, device, workers: int = 20, sym_cfg: dict | None = None):
+    """{key: 8,192 bbox-frame points}, {key: SEM embedding}, {key: (mesh box centre, half extents)}. The SEM is the pose
+    config's (`sym_cfg` = its `model.sym_embedding`, `caoa.models.sem.sem_checkpoint`; default the legacy run)."""
     cad_points, sem_clouds, cad_box = {}, {}, {}
     with Pool(workers, initializer=_init, initargs=(paths.shapenet,)) as pool:
         for key, cad, sem, center, half in pool.imap_unordered(sample_candidate, sorted(keys), chunksize=8):
             cad_points[key], sem_clouds[key], cad_box[key] = cad, sem, (center, half)
     sem_model = SEMClassifier()
-    load_legacy_sem(sem_model, paths.legacy_repo / "checkpoints/symmetry_ptv3" / SEM_RUN / f"{SEM_RUN}.pth")
+    load_legacy_sem(sem_model, sem_checkpoint(paths, sym_cfg))
     sem_model = sem_model.to(device).eval()
     order, sym_embeddings = sorted(keys), {}
     with torch.no_grad():

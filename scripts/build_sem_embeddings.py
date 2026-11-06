@@ -19,7 +19,7 @@ from tqdm import tqdm
 from caoa.data.legacy_sampling import sample_points
 from caoa.data.pose_dataset import SEM_FRAMES, sem_embedding_path
 from caoa.data.shapenet import load_cad_mesh, sample_uniform
-from caoa.models.sem import SEMClassifier, load_legacy_sem, make_batch
+from caoa.models.sem import SEMClassifier, load_legacy_sem, make_batch, sem_checkpoint
 from caoa.paths import load_paths
 
 RUN = "S2Csym_emb128_bce_vox1cm_wd1e-03_b64_lr1e-04_bbcls-ptv3-v1m1-0-shapenet_v2_mini_ptv3cls_softmax_symbinary_cad_bce_adam_cosineannealing"
@@ -34,14 +34,16 @@ def cad_bbox_points(mesh, rng) -> np.ndarray:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--run", default=RUN, help="legacy checkpoints/symmetry_ptv3 run")
+    parser.add_argument("--run", default=RUN, help="legacy checkpoints/symmetry_ptv3 run; with --checkpoint, the cache name")
+    parser.add_argument("--checkpoint", default=None, help="our SEM weights (plain state_dict, relative to the repo), e.g. "
+                        "outputs/sem_cad_bbox/model_recalibrated.pth; default the legacy run's")
     parser.add_argument("--frame", choices=[f for f in SEM_FRAMES if f != "legacy_export"], default="cad_bbox")
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
 
     paths = load_paths()
     model = SEMClassifier()
-    load_legacy_sem(model, paths.legacy_repo / "checkpoints/symmetry_ptv3" / args.run / f"{args.run}.pth")
+    load_legacy_sem(model, sem_checkpoint(paths, {"name": args.run, "checkpoint": args.checkpoint}))
     model = model.cuda().eval()
     with open(paths.legacy_repo / "scan2cad_annotator/s2c_cad_splits.pkl", "rb") as f:
         splits = pickle.load(f)

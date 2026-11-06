@@ -103,6 +103,24 @@ def make_batch(clouds: list[np.ndarray], device, voxel_size: float = VOXEL_SIZE,
     }
 
 
+LEGACY_SEM_RUN = ("S2Csym_emb128_bce_vox1cm_wd1e-03_b64_lr1e-04_bbcls-ptv3-v1m1-0-shapenet_v2_mini_ptv3cls_softmax_symbinary"
+                  "_cad_bce_adam_cosineannealing")
+
+
+def sem_checkpoint(paths, sym_cfg: dict | None = None):
+    """The SEM weights behind a pose config's `sym_embedding`: its `checkpoint` (a plain state_dict, relative to the repo,
+    e.g. our recalibrated retrain `outputs/sem_cad_bbox/model_recalibrated.pth`), else the legacy run `name`."""
+    from pathlib import Path
+
+    from caoa.paths import REPO_ROOT
+
+    sym_cfg = sym_cfg or {}
+    if sym_cfg.get("checkpoint"):
+        return REPO_ROOT / sym_cfg["checkpoint"]
+    run = sym_cfg.get("name", LEGACY_SEM_RUN)
+    return Path(paths.legacy_repo) / "checkpoints/symmetry_ptv3" / run / f"{run}.pth"
+
+
 def load_legacy_sem(model: SEMClassifier, path) -> None:
     """Legacy checkpoints are a plain `state_dict` (`torch.save(model.state_dict())`)."""
     model.load_state_dict(torch.load(path, map_location="cpu", weights_only=False), strict=True)

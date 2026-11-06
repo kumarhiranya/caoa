@@ -1,4 +1,5 @@
-"""Cached SoftGroup val predictions as the instance source of the full pipeline (P11; user decisions 2026-11-04).
+"""Predicted instances as the input of the full pipeline (P11; user decisions 2026-11-04): the cached SoftGroup val
+predictions, and SphericalMask's (same file format, `pred_dir`).
 
 The legacy run's raw outputs (`legacy/data/objects/softgroup_preds/sg_raw/val/<scene>_sg_preds.npz`, 313 scenes): per
 scene a dict with `pred_instances` (each: `pred_mask` as SoftGroup's run-length encoding over the scene's vertices,
@@ -31,13 +32,28 @@ INSTANCE_CLASSES = (
 EXCLUDED_CLASSES = ("door", "window", "picture", "curtain", "shower curtain")
 
 
-def sg_pred_path(legacy_repo: Path, scene_id: str) -> Path:
-    return Path(legacy_repo) / "data/objects/softgroup_preds/sg_raw/val" / f"{scene_id}_sg_preds.npz"
+INSTANCE_SOURCES = ("softgroup", "sphericalmask")
+
+
+def pred_dir(legacy_repo: Path, source: str = "softgroup") -> Path:
+    """Per-scene prediction files. `softgroup`: the cached legacy run. `sphericalmask`: our run of the official checkpoint
+    (`scripts/external/sphericalmask_infer.py`, written in the same format), next to `legacy/` in `caoa_data/`."""
+    if source == "softgroup":
+        return Path(legacy_repo) / "data/objects/softgroup_preds/sg_raw/val"
+    if source == "sphericalmask":
+        return Path(legacy_repo).parent / "sphericalmask/preds/val"
+    raise ValueError(f"instance source {source!r}; one of {INSTANCE_SOURCES}")
+
+
+def sg_pred_path(preds: Path, scene_id: str) -> Path:
+    return Path(preds) / f"{scene_id}_sg_preds.npz"
 
 
 def rle_decode(rle: dict) -> np.ndarray:
-    """SoftGroup `rle_encode` inverse: `counts` = "start length start length ...", 1-based starts."""
-    s = np.asarray(rle["counts"].split(), dtype=np.int64)
+    """SoftGroup `rle_encode` inverse: `counts` = "start length start length ...", 1-based starts. SphericalMask's
+    `rle_encode_gpu_batch` stores the same runs as an integer array instead of a string."""
+    counts = rle["counts"]
+    s = np.asarray(counts.split() if isinstance(counts, str) else counts, dtype=np.int64)
     starts, lengths = s[0::2] - 1, s[1::2]
     mask = np.zeros(rle["length"], dtype=bool)
     for lo, n in zip(starts, lengths):
@@ -56,9 +72,10 @@ class Instance:
     points: np.ndarray = field(repr=False)  # (N, 3) float32, Scan2CAD world frame
 
 
-def load_scene_instances(scans_dir: Path, legacy_repo: Path, scene_id: str, anno: dict, conf_threshold: float = 0.0):
-    """(instances, scene): predicted instances above `conf_threshold`, all classes, points in the Scan2CAD world frame."""
-    preds = np.load(sg_pred_path(legacy_repo, scene_id), allow_pickle=True)["arr_0"].item()
+def load_scene_instances(scans_dir: Path, preds_dir: Path, scene_id: str, anno: dict, conf_threshold: float = 0.0):
+    """(instances, scene): predicted instances above `conf_threshold`, all classes, points in the Scan2CAD world frame.
+    `preds_dir`: see `pred_dir`."""
+    preds = np.load(sg_pred_path(preds_dir, scene_id), allow_pickle=True)["arr_0"].item()
     scene = load_scene(scans_dir, scene_id)
     if len(scene.points) != len(preds["semantic_preds"]):
         raise ValueError(f"{scene_id}: {len(scene.points)} vertices vs {len(preds['semantic_preds'])} in the SoftGroup file")
@@ -70,8 +87,10 @@ def load_scene_instances(scans_dir: Path, legacy_repo: Path, scene_id: str, anno
         mask = rle_decode(inst["pred_mask"])
         if not mask.any():
             continue
+        sem = np.asarray(preds["semantic_preds"])
+        sem = sem.argmax(1) if sem.ndim == 2 else sem  # SphericalMask stores per-point class scores
         out.append(Instance(scene_id, i, INSTANCE_CLASSES[int(inst["label_id"]) - 1],
-                            scannet20_name(dominant_label(preds["semantic_preds"][mask])), float(inst["conf"]),
+                            scannet20_name(dominant_label(sem[mask])), float(inst["conf"]),
                             np.flatnonzero(mask), world[mask]))
     return out, scene
 

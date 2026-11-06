@@ -62,7 +62,7 @@ def main():
     cols = [[keys[j] for j in row] + [cad_key(p)] for row, p in zip(top, pairs)]
     cand_keys = {key for row in cols for key in row}
     print(f"{len(pairs)} objects, k={args.k}: {len(cand_keys)} unique candidate CADs")
-    cad_points, sym_embeddings, cad_box = pipeline.prepare_candidates(cand_keys, paths, device, args.workers)
+    cad_points, sym_embeddings, cad_box = pipeline.prepare_candidates(cand_keys, paths, device, args.workers, pcfg["model"].get("sym_embedding"))
     ocam = pipeline.load_ocam(pcfg, REPO_ROOT / "outputs" / args.pose / "model_final.pth", device)
     pred, target, nscale, noff, scores = pipeline.align(pairs, completions, cols, pcfg, ocam, cad_points, sym_embeddings, device)
     results = pipeline.evaluate_selections(pairs, cols, pred, target, nscale, noff, scores, scan2cad.load_annotations(paths.s2c_annotations),

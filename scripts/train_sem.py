@@ -13,7 +13,8 @@ Fix (user, 2026-11-03), switch `--bn-recalibration train` (default `none` = lega
 running statistics are recomputed on training data in eval mode (`caoa.models.sem.recalibrate_batchnorm`). Without it the
 CAD-frame model fails in eval mode, because its statistics were accumulated with drop-path on (docs/results/P9.md).
 Outputs in `outputs/<name>/`: `model.pth` (plain state_dict, the legacy checkpoint format, recalibrated if switched on),
-`train_log.json`, `results.json` (`final`: the last logged validation; `final_recalibrated` with the fix).
+`train_log.json`, `results.json` (`final`: the last logged validation; `final_recalibrated` with the fix). `--eval-only` with
+the fix writes `results_eval_only.json` and the recalibrated weights, `model_recalibrated.pth`.
 
     uv run python scripts/train_sem.py [--name sem_cad_bbox] [--max-steps 10000] [--bn-recalibration train]
     uv run python scripts/train_sem.py --eval-only outputs/sem_cad_bbox/model.pth --bn-recalibration train
@@ -141,6 +142,7 @@ def main():
         if args.bn_recalibration == "train":
             recalibrate(model, train_ds, device)
             results["final_recalibrated"] = evaluate(model, val_loader, val_ds, device)
+            torch.save(model.state_dict(), out_dir / "model_recalibrated.pth")
         print(json.dumps({k: v for k, v in results.items() if k.startswith("final")}, indent=1))
         (out_dir / "results_eval_only.json").write_text(json.dumps(results, indent=1))
         return

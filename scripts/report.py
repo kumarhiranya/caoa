@@ -6,7 +6,8 @@ Sources (missing ones are skipped and listed at the end):
   `--eval-only` re-evaluation with every current report key), else `outputs/<run>/results.json`; seeds `<run>_seed778`,
   `<run>_seed779` are averaged with the original (seed 777) run: mean ± sample std over the seeds present;
 * CAD retrieval (P11d): `outputs/retrieval_embed_comp_inst/results.json`, `outputs/rerank_*/results.json`;
-* full pipeline on SoftGroup instances (P11): `outputs/p11_softgroup/{results,matching}.json`.
+* full pipeline (P11): `outputs/p11_<softgroup|sphericalmask>/{results,matching}.json`;
+* release models (user, 2026-11-06): `outputs/ours_*`, `outputs/rerank_ours_*`, `outputs/p11_<source>_ours[_common]/`.
 Leaky (GT-frame completion) runs are not reported (user, 2026-11-03).
 
     uv run python scripts/report.py
@@ -39,6 +40,10 @@ ABLATION = [
     ("**+ SEM + Siamese, separate trunks (final)**", "siamunshared_world_comp_concat_only_emb1024"),
     ("+ paper loss (t2/r3/s2 + 5 × Chamfer)", "chamfer_siamunshared_world_comp_concat_only_emb1024"),
     ("+ paper schedule", "paperschedule_chamfer_siamunshared_world_comp_concat_only_emb1024"),
+]
+RELEASE_POSE = [
+    ("Current final model (legacy CAPCM + SEM inputs)", "siamunshared_world_comp_concat_only_emb1024"),
+    ("**Release: our CAPCM + SEM inputs**", "ours_siamunshared_world_comp_concat_only_emb1024"),
 ]
 P8_VARIANTS = [
     ("S2C-C completion, completion only, emb 1024", "world_comp_s2cc_only_emb1024"),
@@ -125,16 +130,16 @@ def ablation_section(entries, title, note):
          "S2C criteria plain", "S2C box"], rows)
 
 
-def retrieval_section():
-    d = load(OUT / "retrieval_embed_comp_inst" / "results.json")
-    lines = ["## CAD retrieval over ShapeNetV2 (P11d), GT instances", ""]
+def retrieval_section(run: str = "retrieval_embed_comp_inst", title: str = "CAD retrieval over ShapeNetV2 (P11d), GT instances"):
+    d = load(OUT / run / "results.json")
+    lines = [f"## {title}", ""]
     if d:
         rows = [[mode, f"{v['recall@1'] * 100:.1f} / {v['recall@10'] * 100:.1f} / {v['recall@50'] * 100:.1f}", f"{v['rank_median']:.0f}",
                  f"{v['category_acc'] * 100:.1f}", f"{v['cd_l1']:.1f} ({v['random_cd_l1']:.1f})"]
                 for mode, v in d.items() if isinstance(v, dict) and "recall@1" in v]
         lines += ["Stage 1 (embedding), 1,864 val objects, 52,472 database CADs.", "",
                   table(["Search / yaw averaging", "Exact recall @1 / @10 / @50", "Median GT rank", "Category acc.", "CD-L1 top-1 vs GT (random)"], rows), ""]
-    for f in sorted(OUT.glob("rerank_*k10/results.json")):
+    for f in sorted(OUT.glob(f"rerank_{run}__*k10/results.json")):
         r = json.loads(f.read_text())
         rows = [[name, f"{v['exact_hit'] * 100:.1f}", f"{v['cd_l1_to_gt']:.1f}", f"{v['legacy_total_acc'] * 100:.2f}",
                  f"{v['s2c_criteria']['minus_center']['instance_mean'] * 100:.2f}",
@@ -145,19 +150,22 @@ def retrieval_section():
     return "\n".join(lines)
 
 
-def p11_section():
-    r, m = load(OUT / "p11_softgroup" / "results.json"), load(OUT / "p11_softgroup" / "matching.json")
-    lines = ["## Full pipeline on SoftGroup instances (P11)", ""]
+def p11_section(source: str, title: str, tag: str = "", heading: str = ""):
+    r, m = load(OUT / f"p11_{source}{tag}" / "results.json"), load(OUT / f"p11_{source}{tag}" / "matching.json")
+    lines = [f"## {heading or f'Full pipeline on {title} instances (P11)'}", ""]
     if m:
         rows = []
         for t, v in m.items():
+            if t == "matched_objects":
+                continue
             det = v.get("detection", {})
             rows.append([t, f"{v['capture'] * 100:.1f}", v["n_predictions"],
                          (f"{det['precision'] * 100:.1f} / {det['recall'] * 100:.1f} / {det['f1']:.3f}" if det else "—")])
         lines += [table(["Confidence ≥", "Capture of S2C-C objects (%)", "Predictions", "Detection vs ScanNet: precision / recall / F1"], rows), ""]
     if r:
         rows = []
-        for row, label in (("gt_instances", "GT instances"), ("softgroup_class", "SoftGroup, class-mapped retrieval"), ("softgroup_all", "SoftGroup, all-category retrieval")):
+        for row, label in (("gt_instances", "GT instances"), (f"{source}_class", f"{title}, class-mapped retrieval"),
+                           (f"{source}_all", f"{title}, all-category retrieval")):
             for name, v in r.get(row, {}).items():
                 if row != "gt_instances" and name not in ("gt_cad", "stage1", "rerank_sum"):
                     continue
@@ -170,11 +178,31 @@ def p11_section():
     return "\n".join(lines)
 
 
+def p11_summary(tag: str, title: str, note: str):
+    """One row per instance source and object set: the source's own matched objects, and the objects both sources match."""
+    rows = []
+    for source, name in (("softgroup", "SoftGroup"), ("sphericalmask", "SphericalMask")):
+        for suffix, objects in (("", "own matches"), ("_common", "matched by both")):
+            r = load(OUT / f"p11_{source}{tag}{suffix}" / "results.json")
+            if not r:
+                continue
+            ref = r["gt_instances"]["gt_cad"]
+            cells = [name, objects, r["n_matched"]]
+            for v in (ref, r[f"{source}_class"]["rerank_sum"], r[f"{source}_class"]["gt_cad"]):
+                cells.append(f"{v['legacy_table1']['micro'] * 100:.2f} / {v['legacy_table1']['macro'] * 100:.2f}")
+            cells.append(f"{(r[f'{source}_class']['rerank_sum']['legacy_table1']['micro'] - ref['legacy_table1']['micro']) * 100:+.2f}")
+            cells.append(f"{r[f'{source}_class']['rerank_sum']['s2c_box']['instance_mean'] * 100:.2f}")
+            rows.append(cells)
+    return f"## {title}\n\n{note}\n\n" + table(
+        ["Instances", "Objects", "N", "GT instances + GT CAD", "Predicted + retrieval (final)", "Predicted + GT CAD",
+         "Final − GT-instance ref.", "Final: S2C box"], rows)
+
+
 def paper_table1_section():
     rows = [[k, f"{a:.2f} / {c:.2f}"] for k, (a, c) in PAPER_TABLE1.items()]
     return ("## Paper Table 1 (for reference)\n\nAvg / class avg. Our counterparts: CAPCM+SEM-GT → the GT-instance ablation above "
-            "(Table 1 grouping column); CAPCM+SEM-SG → the SoftGroup rows of P11; the Sph rows are **not reproduced (pending: "
-            "SphericalMask, to be run in a fresh job)**.\n\n" + table(["Paper row", "Avg / class avg"], rows))
+            "(Table 1 grouping column); CAPCM+SEM-SG → the SoftGroup rows of P11; CAPCM+SEM-Sph → the "
+            "SphericalMask rows (official checkpoint, run 2026-11-05).\n\n" + table(["Paper row", "Avg / class avg"], rows))
 
 
 def main():
@@ -190,7 +218,20 @@ def main():
                          "Same report; single runs unless seeds were added."),
         paper_table1_section(),
         retrieval_section(),
-        p11_section(),
+        p11_section("softgroup", "SoftGroup"),
+        p11_section("sphericalmask", "SphericalMask"),
+        "# Release models: this project's own CAPCM and SEM as inputs (user, 2026-11-06)",
+        ablation_section(RELEASE_POSE, "Release OCAM on GT instances",
+                         "As the P10 final model, with completions from our concat CAPCM and embeddings from our recalibrated SEM; "
+                         "single seed. The current final model (legacy CAPCM / SEM inputs) for comparison."),
+        retrieval_section("ours_embed_comp_inst", "Release CAD retrieval, GT instances"),
+        p11_summary("_ours", "Release full pipeline: summary",
+                    "Legacy metric in the Table 1 grouping, avg / class avg; class-mapped retrieval, re-ranked (`rerank_sum`). "
+                    "Only S2C-C objects matched by a predicted instance (IoU ≥ 0.5, conf ≥ 0.3) are evaluated; unmatched "
+                    "predictions and objects are not failures. Each source on its own matches (main view, with the GT-instance "
+                    "reference on the same objects), and both on the objects both match (the head-to-head comparison)."),
+        p11_section("softgroup", "SoftGroup", "_ours", "Release full pipeline on SoftGroup instances"),
+        p11_section("sphericalmask", "SphericalMask", "_ours", "Release full pipeline on SphericalMask instances"),
     ]
     if MISSING:
         sections.append("## Missing sources\n\n" + "\n".join(f"- `{m}`" for m in sorted(set(MISSING))))

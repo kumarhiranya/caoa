@@ -16,7 +16,11 @@ def test_rle_round_trip():
     for p in (0.01, 0.3, 0.9):
         mask = rng.random(5000) < p
         mask[0] = mask[-1] = True  # runs touching both ends
-        assert np.array_equal(rle_decode(rle_encode(mask)), mask)
+        rle = rle_encode(mask)
+        assert np.array_equal(rle_decode(rle), mask)
+        # SphericalMask's `rle_encode_gpu_batch`: the same runs as an integer array
+        as_array = {"length": rle["length"], "counts": np.asarray(rle["counts"].split(), dtype=np.int64)}
+        assert np.array_equal(rle_decode(as_array), mask)
 
 
 def _inst(ids):
