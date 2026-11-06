@@ -33,6 +33,13 @@ EXCLUDED_CLASSES = ("door", "window", "picture", "curtain", "shower curtain")
 
 
 INSTANCE_SOURCES = ("softgroup", "sphericalmask")
+SG_TO_SCANNET20 = {"refrigerator": "refridgerator"}  # SoftGroup's spelling vs ours
+KEPT_SCANNET20 = {SG_TO_SCANNET20.get(c, c) for c in INSTANCE_CLASSES if c not in EXCLUDED_CLASSES}
+
+
+def scannet20_label(instance_label: str) -> str:
+    """ScanNet20 name (our spelling) of an instance class."""
+    return SG_TO_SCANNET20.get(instance_label, instance_label)
 
 
 def pred_dir(legacy_repo: Path, source: str = "softgroup") -> Path:

@@ -35,7 +35,7 @@ from caoa.data.pairs import load_pairs
 from caoa.data.pose_completion import MIN_POINTS, complete, load_pose_completions, to_canonical
 from caoa.data.scannet import dominant_label
 from caoa.data.shapenet import load_shapenet_points
-from caoa.data.softgroup import EXCLUDED_CLASSES, INSTANCE_CLASSES, INSTANCE_SOURCES, load_scene_instances, match_instances, pred_dir, sg_pred_path
+from caoa.data.softgroup import EXCLUDED_CLASSES, INSTANCE_SOURCES, KEPT_SCANNET20, SG_TO_SCANNET20, load_scene_instances, match_instances, pred_dir, sg_pred_path
 from caoa.eval.scan2cad_benchmark import category_name
 from caoa.models.odgnet import UpTrans, load_legacy_checkpoint
 from caoa.paths import REPO_ROOT, load_paths
@@ -45,27 +45,7 @@ from caoa.retrieval.model import CADRetrieval
 
 CAPCM = "experiments/UpTrans_comp/Concat_SN_S2CC/concat_snaug_s2cc_upTransb_comp"
 CONF_THRESHOLDS = (0.0, 0.1, 0.3, 0.5)
-SEARCH_ALL = ("otherfurniture",)
-SG_TO_SCANNET20 = {"refrigerator": "refridgerator"}  # SoftGroup's spelling vs ours
-KEPT_SCANNET20 = {SG_TO_SCANNET20.get(c, c) for c in INSTANCE_CLASSES if c not in EXCLUDED_CLASSES}
 CTX = {}
-
-
-def class_synsets(train_pairs, coverage: float = 0.95) -> dict[str, list[str]]:
-    """Per ScanNet class, the fewest CAD synsets covering `coverage` of its train pairs (no val information)."""
-    counts = defaultdict(Counter)
-    for p in train_pairs:
-        counts[p.scannet_class][p.catid_cad] += 1
-    out = {}
-    for cls, c in counts.items():
-        total, acc, keep = sum(c.values()), 0, []
-        for syn, n in c.most_common():
-            keep.append(syn)
-            acc += n
-            if acc / total >= coverage:
-                break
-        out[cls] = keep
-    return out
 
 
 def scene_job(scene_id):
@@ -203,7 +183,7 @@ def main():
     gt_comp = load_pose_completions(paths.cache, comp_cfg["name"], comp_cfg["frame"])
 
     # 4: retrieval (class-mapped and all), then alignment
-    synsets = class_synsets(load_pairs(paths.cache, "train", class_rule=pcfg["data"]["class_rule"]))
+    synsets = pipeline.class_synsets(load_pairs(paths.cache, "train", class_rule=pcfg["data"]["class_rule"]))
     (out_dir / "class_synsets.json").write_text(json.dumps(synsets, indent=1))
     db = load_shapenet_points(paths.cache)
     keys = db["keys"].tolist()
@@ -213,9 +193,7 @@ def main():
     rmodel.load_state_dict(torch.load(REPO_ROOT / "outputs" / args.retrieval / "model_final.pth", map_location=device)["model"])
     db_emb = search.embed_points(rmodel.cad, db_points, device)
     queries = fixed_queries(sg_pairs, sg_comp, rcfg["data"]["num_points"], rcfg["data"]["inst_fraction"], rcfg["seed"])
-    db_cat = np.asarray(db["catids"])
-    allowed = torch.stack([torch.from_numpy(np.isin(db_cat, synsets[c]) if c in synsets and c not in SEARCH_ALL else np.ones(len(db_cat), bool))
-                           for c in labels]).to(device)
+    allowed = pipeline.class_allowed(labels, synsets, db["catids"]).to(device)
     tops = {"class": pipeline.stage1(rmodel, queries, db_emb, allowed, device, args.k, args.yaws),
             "all": pipeline.stage1(rmodel, queries, db_emb, None, device, args.k, args.yaws)}
     del rmodel, db_emb, allowed

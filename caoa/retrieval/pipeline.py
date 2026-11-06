@@ -39,6 +39,35 @@ SCORE_POINTS = 2048
 SHAPENET = None
 
 
+SEARCH_ALL = ("otherfurniture",)  # predicted classes that search every synset
+
+
+def class_synsets(train_pairs, coverage: float = 0.95) -> dict[str, list[str]]:
+    """Per ScanNet class, the fewest CAD synsets covering `coverage` of its train pairs (no val information)."""
+    from collections import Counter, defaultdict
+
+    counts = defaultdict(Counter)
+    for p in train_pairs:
+        counts[p.scannet_class][p.catid_cad] += 1
+    out = {}
+    for cls, c in counts.items():
+        total, acc, keep = sum(c.values()), 0, []
+        for syn, n in c.most_common():
+            keep.append(syn)
+            acc += n
+            if acc / total >= coverage:
+                break
+        out[cls] = keep
+    return out
+
+
+def class_allowed(labels, synsets: dict, db_catids) -> torch.Tensor:
+    """(Q, N) bool: the database CADs each query may retrieve (its class's synsets; all for SEARCH_ALL / unmapped)."""
+    db_cat = np.asarray(db_catids)
+    return torch.stack([torch.from_numpy(np.isin(db_cat, synsets[c]) if c in synsets and c not in SEARCH_ALL else np.ones(len(db_cat), bool))
+                        for c in labels])
+
+
 def _init(root):
     global SHAPENET
     SHAPENET = root

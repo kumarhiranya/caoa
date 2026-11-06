@@ -58,3 +58,16 @@ def test_retrieval_model_forward_backward():
     loss = info_nce(q, c, torch.arange(6, device="cuda"), torch.arange(4, device="cuda"), model.logit_scale())
     loss.backward()
     assert model.log_scale.grad is not None and next(model.cad.trunk.parameters()).grad is not None
+
+
+def test_class_synsets_and_allowed():
+    from types import SimpleNamespace
+
+    from caoa.retrieval.pipeline import class_allowed, class_synsets
+
+    pairs = [SimpleNamespace(scannet_class="chair", catid_cad=c) for c in ["a"] * 96 + ["b"] * 4]
+    pairs += [SimpleNamespace(scannet_class="table", catid_cad=c) for c in ["t"] * 50 + ["u"] * 50]
+    syn = class_synsets(pairs)
+    assert syn == {"chair": ["a"], "table": ["t", "u"]}  # fewest synsets covering 95%
+    allowed = class_allowed(["chair", "otherfurniture", "sofa"], syn, ["a", "b", "t"]).numpy()
+    assert allowed.tolist() == [[True, False, False], [True, True, True], [True, True, True]]  # search-all / unmapped
