@@ -190,16 +190,16 @@ def main():
     print(f"evaluating {len(sg_pairs)} matched instances (conf >= {args.conf})")
 
     # 3: completion, leak-free (world frame), stored in the pair's storage frame as the pose caches
-    # the CAPCM behind the pose config's completion cache: its `checkpoint` (our run dir), else the legacy concat run
-    capcm_dir = REPO_ROOT / pcfg["data"]["completion"]["checkpoint"] if pcfg["data"]["completion"].get("checkpoint") \
-        else paths.legacy_repo / "ODGNet" / CAPCM
+    # The CAPCM behind the completion cache: the pose config's, or, for an OCAM without completion input, the retrieval
+    # config's (retrieval queries always use completions). Its `checkpoint` (our run dir), else the legacy concat run.
+    comp_cfg = pcfg["data"].get("completion") or rcfg["data"]["completion"]
+    capcm_dir = REPO_ROOT / comp_cfg["checkpoint"] if comp_cfg.get("checkpoint") else paths.legacy_repo / "ODGNet" / CAPCM
     capcm = UpTrans.from_config(yaml.safe_load(open(capcm_dir / "config.yaml"))["model"]).to(device).eval()
     print(f"CAPCM {capcm_dir} (epoch {load_legacy_checkpoint(capcm, capcm_dir / 'ckpt-best.pth')['epoch']})")
     np.random.seed(0)
     world = complete(capcm, [tile_to_min(p.points.astype(np.float64), MIN_POINTS) for p in sg_pairs], device)
     sg_comp = {(p.scene_id, p.model_index): to_canonical(p, c) for p, c in zip(sg_pairs, world)}
     del capcm
-    comp_cfg = pcfg["data"]["completion"]
     gt_comp = load_pose_completions(paths.cache, comp_cfg["name"], comp_cfg["frame"])
 
     # 4: retrieval (class-mapped and all), then alignment

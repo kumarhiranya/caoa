@@ -28,7 +28,7 @@ from caoa.data.shapenet import load_cad_mesh, sample_uniform
 from caoa.eval import box_criteria, groupings, legacy_report, scan2cad_benchmark
 from caoa.eval.pose_eval import to_world
 from caoa.models.chamfer import nn_squared_distances
-from caoa.models.ocam import OCAMSiamese
+from caoa.models.ocam import OCAMObjectOnly, OCAMSiamese
 from caoa.models.pose_losses import box_points
 from caoa.models.sem import SEMClassifier, load_legacy_sem, make_batch, sem_checkpoint
 from caoa.retrieval import search
@@ -104,8 +104,15 @@ def prepare_candidates(keys, paths, device, workers: int = 20, sym_cfg: dict | N
     return cad_points, sym_embeddings, cad_box
 
 
-def load_ocam(pcfg: dict, checkpoint, device) -> OCAMSiamese:
-    ocam = OCAMSiamese(embedding=pcfg["model"]["embedding"], ext_emb_size=128, shared=pcfg["model"]["siamese"]["shared"]).to(device)
+def load_ocam(pcfg: dict, checkpoint, device):
+    """The pose config's OCAM: Siamese (P10b) if it has `model.siamese`, else single-trunk (object [+ SEM] only: the
+    baseline and no-completion rows of paper Table 1). SEM width 128 iff `model.sym_embedding`."""
+    ext = 128 if pcfg["model"].get("sym_embedding") else 0
+    if pcfg["model"].get("siamese"):
+        ocam = OCAMSiamese(embedding=pcfg["model"]["embedding"], ext_emb_size=ext, shared=pcfg["model"]["siamese"]["shared"])
+    else:
+        ocam = OCAMObjectOnly(embedding=pcfg["model"]["embedding"], ext_emb_size=ext)
+    ocam = ocam.to(device)
     ocam.load_state_dict(torch.load(checkpoint, map_location=device)["model"])
     return ocam.eval()
 
@@ -113,7 +120,15 @@ def load_ocam(pcfg: dict, checkpoint, device) -> OCAMSiamese:
 @torch.no_grad()
 def align(pairs, completions: dict, cols: list[list[str]], pcfg: dict, ocam, cad_points, sym_embeddings, device):
     """OCAM predictions for every (object, candidate) and the fit scores. `cols[i]`: the object's candidates (k), then
-    its GT CAD. Returns pred, target, norm_scale, norm_offset (each (Q, k + 1, ...)) and the scores (Q, k)."""
+    its GT CAD. Returns pred, target, norm_scale, norm_offset (each (Q, k + 1, ...)) and the scores (Q, k).
+
+    The OCAM input follows the pose config: completions only if it has `data.completion` (`completions` is then
+    required), the CAD only for a Siamese OCAM (a single-trunk OCAM predicts the same box for every candidate, so the
+    candidates differ only in the fit scores), SEM only with `model.sym_embedding`. Without completions the `comp` score
+    is undefined and `sum` = `inst`."""
+    comp_cfg = pcfg["data"].get("completion")
+    siamese = bool(pcfg["model"].get("siamese"))
+    use_sym = bool(pcfg["model"].get("sym_embedding"))
     K = len(cols[0])
     flat_pairs, query_of = [], []
     for qi, (p, row) in enumerate(zip(pairs, cols)):
@@ -122,12 +137,17 @@ def align(pairs, completions: dict, cols: list[list[str]], pcfg: dict, ocam, cad
             flat_pairs.append(dataclasses.replace(p, catid_cad=catid, id_cad=id_cad))
             query_of.append(qi)
     data = {k: tuple(v) if isinstance(v, list) else v for k, v in pcfg["data"].items() if k not in ("class_rule", "completion")}
-    ds = ObjectPoseDataset(flat_pairs, False, PoseDataConfig(**data), completions, pcfg["data"]["completion"]["mode"], sym_embeddings, cad_points)
+    ds = ObjectPoseDataset(flat_pairs, False, PoseDataConfig(**data), completions if comp_cfg else None,
+                           comp_cfg["mode"] if comp_cfg else None, sym_embeddings if use_sym else None, cad_points if siamese else None)
     loader = DataLoader(Seeded(ds, query_of), batch_size=64, num_workers=8, collate_fn=collate)
     preds, tgts, nscale, noff = [], [], [], []
     for b in loader:
-        preds.append(ocam(b["coords"].to(device), b["feats"].to(device), b["batch"].to(device), b["batch_size"],
-                          b["cad_coords"].to(device), b["cad_feats"].to(device), b["cad_batch"].to(device), b["sym_emb"].to(device)).cpu())
+        obj = (b["coords"].to(device), b["feats"].to(device), b["batch"].to(device), b["batch_size"])
+        sym = b["sym_emb"].to(device) if use_sym else None
+        if siamese:
+            preds.append(ocam(*obj, b["cad_coords"].to(device), b["cad_feats"].to(device), b["cad_batch"].to(device), sym).cpu())
+        else:
+            preds.append(ocam(*obj, sym).cpu())
         tgts.append(b["target"])
         nscale.append(b["norm_scale"])
         noff.append(b["norm_offset"])
@@ -138,20 +158,25 @@ def align(pairs, completions: dict, cols: list[list[str]], pcfg: dict, ocam, cad
     unit = torch.stack([torch.from_numpy(cad_points[cad_key(p)][rng.choice(CAD_POINTS, SCORE_POINTS, replace=False)]
                                          / np.maximum(np.ptp(cad_points[cad_key(p)], axis=0), 1e-3)) for p in flat_pairs])
     placed = box_points(pred.float(), unit.float())
-    obj_comp = torch.stack([torch.from_numpy(sample_points(world_completion(p, completions[(p.scene_id, p.model_index)]), SCORE_POINTS)) for p in pairs])
+    has_comp = comp_cfg is not None
+    if has_comp:
+        obj_comp = torch.stack([torch.from_numpy(sample_points(world_completion(p, completions[(p.scene_id, p.model_index)]), SCORE_POINTS)) for p in pairs])
     obj_inst = torch.stack([torch.from_numpy(sample_points(p.points.astype(np.float64), SCORE_POINTS)) for p in pairs])
     per_q = torch.arange(len(flat_pairs)) // K
-    comp_t = obj_comp[per_q] * nscale[:, None, None] - noff[:, None, :]
+    comp_t = obj_comp[per_q] * nscale[:, None, None] - noff[:, None, :] if has_comp else None
     inst_t = obj_inst[per_q] * nscale[:, None, None] - noff[:, None, :]
     s_comp, s_inst = [], []
     for s in range(0, len(flat_pairs), 512):
         a = placed[s : s + 512].to(device)
-        d1, d2 = nn_squared_distances(a, comp_t[s : s + 512].float().to(device))
-        s_comp.append(((d1.sqrt().mean(1) + d2.sqrt().mean(1)) / 2).cpu())
+        if has_comp:
+            d1, d2 = nn_squared_distances(a, comp_t[s : s + 512].float().to(device))
+            s_comp.append(((d1.sqrt().mean(1) + d2.sqrt().mean(1)) / 2).cpu())
         _, di = nn_squared_distances(a, inst_t[s : s + 512].float().to(device))
         s_inst.append(di.sqrt().mean(1).cpu())
-    scores = {"comp": torch.cat(s_comp).view(-1, K)[:, : K - 1], "inst": torch.cat(s_inst).view(-1, K)[:, : K - 1]}
-    scores["sum"] = scores["comp"] + scores["inst"]
+    scores = {"inst": torch.cat(s_inst).view(-1, K)[:, : K - 1]}
+    if has_comp:
+        scores["comp"] = torch.cat(s_comp).view(-1, K)[:, : K - 1]
+    scores["sum"] = scores["comp"] + scores["inst"] if has_comp else scores["inst"]
     return pred.view(-1, K, 15), target.view(-1, K, 15), nscale.view(-1, K), noff.view(-1, K, 3), scores
 
 

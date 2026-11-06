@@ -5,7 +5,7 @@ seed: 0
 
 data:
   class_rule: relpose_cache  # the pairs that have leak-free completions cached (6,663 train / 1,864 val)
-  completion: {name: ours_concat, frame: world}
+  completion: {name: ours_concat, frame: world, checkpoint: outputs/legacy_concat}
   num_points: 2048
   inst_fraction: 0.5
 
