@@ -35,6 +35,12 @@ uv run python scripts/align_scene.py --release <release_v1> --ply <scene>_vh_cle
 Per instance it writes the retrieved ShapeNetV2 model, its pose (`cad_to_scan`, `cad_to_world` and a Scan2CAD-style
 `trs`) and the predicted oriented box. It needs ShapeNetCore v2 for the candidate meshes and a GPU.
 
+[`notebooks/single_scene_pipeline.ipynb`](notebooks/single_scene_pipeline.ipynb) runs the same pipeline stage by stage
+on one scan and draws each stage (interactive plotly): input scan, instance segmentation, completion, stage-1 retrieval,
+SEM symmetry, alignment and re-ranking of every candidate, the full output scene, and, for annotated val scenes, the
+result against the S2C-C ground truth per object. `uv sync --extra train --extra notebook`; the notebook is stored
+without outputs (about 30 s per scene on an A100). GPU nondeterminism moves the poses by about 1 cm between runs.
+
 ## Reproducing
 
 Each step writes `outputs/<name>/` (config, logs, checkpoints, `results.json`); caches go to `cache` in the paths file.

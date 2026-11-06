@@ -114,9 +114,10 @@ def stage1(rmodel, queries: np.ndarray, db_emb: torch.Tensor, allowed: torch.Ten
     return sim.topk(k, dim=1).indices.cpu().numpy()
 
 
-def prepare_candidates(keys, paths, device, workers: int = 20, sym_cfg: dict | None = None):
+def prepare_candidates(keys, paths, device, workers: int = 20, sym_cfg: dict | None = None, return_probs: bool = False):
     """{key: 8,192 bbox-frame points}, {key: SEM embedding}, {key: (mesh box centre, half extents)}. The SEM is the pose
-    config's (`sym_cfg` = its `model.sym_embedding`, `caoa.models.sem.sem_checkpoint`; default the legacy run)."""
+    config's (`sym_cfg` = its `model.sym_embedding`, `caoa.models.sem.sem_checkpoint`; default the legacy run).
+    `return_probs`: also {key: SEM class probabilities (not symmetric, symmetric)}."""
     cad_points, sem_clouds, cad_box = {}, {}, {}
     with Pool(workers, initializer=_init, initargs=(paths.shapenet,)) as pool:
         for key, cad, sem, center, half in pool.imap_unordered(sample_candidate, sorted(keys), chunksize=8):
@@ -124,13 +125,14 @@ def prepare_candidates(keys, paths, device, workers: int = 20, sym_cfg: dict | N
     sem_model = SEMClassifier()
     load_legacy_sem(sem_model, sem_checkpoint(paths, sym_cfg))
     sem_model = sem_model.to(device).eval()
-    order, sym_embeddings = sorted(keys), {}
+    order, sym_embeddings, sym_probs = sorted(keys), {}, {}
     with torch.no_grad():
         for s in range(0, len(order), 32):
             chunk = order[s : s + 32]
-            emb = sem_model(make_batch([sem_clouds[k] for k in chunk], device, grid="train"))["emb"].cpu().numpy()
-            sym_embeddings.update(zip(chunk, emb.astype(np.float32)))
-    return cad_points, sym_embeddings, cad_box
+            r = sem_model(make_batch([sem_clouds[k] for k in chunk], device, grid="train"))
+            sym_embeddings.update(zip(chunk, r["emb"].cpu().numpy().astype(np.float32)))
+            sym_probs.update(zip(chunk, r["probs"].cpu().numpy()))
+    return (cad_points, sym_embeddings, cad_box, sym_probs) if return_probs else (cad_points, sym_embeddings, cad_box)
 
 
 def load_ocam(pcfg: dict, checkpoint, device):
