@@ -1,0 +1,37 @@
+# Release OCAM (user, 2026-11-06: no legacy results, code or checkpoints in the release). The P10b final model
+# (siamunshared_world_comp_concat_only_emb1024), trained on inputs from this project's own models only:
+#   completion: our concat CAPCM retrain (P7 extension, outputs/legacy_concat, ckpt-best), leak-free world frame,
+#               cache `ours_concat__world` (scripts/build_pose_completions.py);
+#   SEM:        our SEM retrain with the BatchNorm recalibration fix (P9, outputs/sem_cad_bbox/model_recalibrated.pth),
+#               cad_bbox embeddings `ours_sem_cad_bbox__cad_bbox` (scripts/build_sem_embeddings.py).
+# `checkpoint` entries name the weights behind each cache, for the stages that run the model again (P11).
+name: ours_siamunshared_world_comp_concat_only_emb1024_seed779
+seed: 779
+
+model:
+  embedding: 1024
+  siamese: {shared: false}
+  sym_embedding: {name: ours_sem_cad_bbox, frame: cad_bbox, checkpoint: outputs/sem_cad_bbox/model_recalibrated.pth}
+
+data:
+  class_rule: relpose_cache
+  completion: {name: ours_concat, mode: only, frame: world, checkpoint: outputs/legacy_concat}
+  num_points: 8192
+  voxel_size: 0.01
+  rot_range_deg: [-180, 180]
+  scale_range: [0.4, 1.4]
+  scale_aspect_range: [0.0, 0.0]
+  trans_range: [-0.5, 0.5]
+
+train:
+  batch_size: 64
+  max_steps: 25000  # the loop still finishes the epoch in which this is reached, as legacy did
+  lr: 1.0e-4
+  weight_decay: 1.0e-3  # AdamW
+  min_lr_ratio: 0.01  # cosine annealing down to lr / 100 (T_max = max_steps)
+  loss_weights: {t: 2, r: 1, s: 2}  # L1, summed over components, averaged over the batch
+  shuffle: false  # the legacy DataLoader did not shuffle
+  num_workers: 8
+  stat_freq: 150
+  save_freq: 1000
+  val_freq: 1000

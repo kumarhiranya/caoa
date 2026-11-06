@@ -471,7 +471,7 @@ SoftGroup val predictions with the models we have (no training on predicted inst
   from the cost of segmentation).
 - **P11e. Evaluation** on the matched instances: legacy metric (box), S2C criteria (unchanged, both conventions), S2C box;
   plus capture rate and false positives. Rows: GT instances (P10b), SoftGroup + GT CAD, SoftGroup + retrieval (class / all).
-- **SphericalMask** (the paper's best rows) stays gated: only if needed later (separate environment, ~6–10 GB).
+- **SphericalMask** (the paper's best rows): done in P12 (2026-11-06), see `docs/results/P11.md` § SphericalMask.
 
 **Outcome (2026-11-04, [results](results/P11.md)): gate passed.** `scripts/run_p11.py`; capture 78.0% (conf ≥ 0.3); segmentation costs ~3 legacy points, retrieval with re-ranking ~0.5.
 
@@ -511,6 +511,15 @@ contribution of the paper; the alignment evaluations use the GT CAD, since they 
   (`paperschedule_chamfer_siamunshared_world_…`). Configs: `configs/pose/seeds/<config>_seed{778,779}.yaml`. Run what fits in
   each Slurm job; RESULTS.md reports mean ± std where 3 seeds exist and marks single-seed numbers.
 - **SphericalMask ("Sph" rows of Table 1):** marked "not reproduced, pending"; to be taken up in a fresh job.
+  **Done 2026-11-06** (job 135765, `docs/results/P11.md` § SphericalMask): official checkpoint, val AP 62.55 / AP50 82.36
+  (paper 62.6 / 81.9); capture 94.5% of S2C-C objects at conf 0.3. Reporting (user, 2026-11-06): each source on its own
+  matches with the GT-instance reference on the same objects, plus both sources on the objects both match.
+- **Release (user, 2026-11-05/06): no legacy results, code or checkpoints.** The released OCAM and retrieval are retrained on
+  inputs from this project's own models: our concat CAPCM (`outputs/legacy_concat`, ckpt-best epoch 110; cache
+  `ours_concat__world`) and our SEM retrain with BN recalibration (`outputs/sem_cad_bbox/model_recalibrated.pth`, val 98.3%;
+  embeddings `ours_sem_cad_bbox__cad_bbox`). Configs `configs/release/` (+ `seeds/` 778, 779); the pose config's
+  `checkpoint` entries name the models behind each cache (used by P11's completion step and the re-ranker's SEM).
+  Location: `caoa_data/release_v1/` on the lab share (proposed).
 - **Deliverables:** `docs/RESULTS.md` (every paper number next to ours, deviations traced to the issue register), README,
   `scripts/report.py` (done: regenerates every table from `outputs/` into `docs/results/tables.md`), and released checkpoints (completion, retrieval, OCAM,
   SEM; location and size to agree).
@@ -518,17 +527,10 @@ contribution of the paper; the alignment evaluations use the GT CAD, since they 
 
 **Seed runs (status):**
 
-| Config | seed 778 | seed 779 |
-|---|---|---|
-| baseline `world_comp_concat_only_emb1024` | running (job 134281, 2026-11-04, GPU 1) | **to run** |
-| + SEM `semcad_world_comp_concat_only_emb1024` | queued (job 134281, GPU 1, after the baseline) | **to run** |
-| Siamese separate `siamunshared_world_comp_concat_only_emb1024` | running (job 134281, GPU 0) | **to run** |
-| Siamese shared `siamshared_world_comp_concat_only_emb1024` | **to run** | **to run** |
-| + paper loss `chamfer_siamunshared_world_comp_concat_only_emb1024` | **to run** | **to run** |
-| + paper schedule `paperschedule_chamfer_siamunshared_world_comp_concat_only_emb1024` | **to run** | **to run** |
-
-Also for the next job: re-run `scripts/run_p11.py` (~15 min) so the SoftGroup rows get the Table 1 grouping
-(`legacy_table1`, added to `caoa/retrieval/pipeline.py` on 2026-11-04), then `scripts/report.py`.
+**All 12 done** (jobs 134281 and 135765, last on 2026-11-06 05:48); mean ± std over 3 seeds in `docs/results/tables.md`.
+The shared-trunk gap (−3.2 vs separate trunks, ~5 std) and the paper schedule's loss (−2.1) hold; + SEM, separate
+trunks and the paper loss are within ~1 point of each other (overlapping spreads). The SoftGroup P11 rows were re-run
+with the Table 1 grouping (2026-11-05). Release OCAM: seeds 778, 779 queued in job 135765 (`configs/release/seeds/`).
 
 Run one with `CUDA_VISIBLE_DEVICES=<g> uv run python scripts/train_pose.py configs/pose/seeds/<config>_seed<s>.yaml`
 (times on an A100: baseline and + SEM ~2.8 h, Siamese ~5.2 h, paper schedule ~4 h).
@@ -652,7 +654,8 @@ Recorded, not chased (ground rule 1). Reproduction follows the code.
 | ScanNet train scenes (P4d-train) | 9.2 GiB | done (scene0212_00 unavailable) |
 | Local ShapeNet mirror (CAD .obj + SN-Indoor partials) | 32.3 GiB | done (194,208 files) |
 | ShapeNetV2 retrieval points (`shapenet_points_v1`, 52,472 × 2,048 float32) | 1.21 GiB, on the DGX lab share | P11d, done (user OK 2026-11-03) |
-| SphericalMask env + outputs | est. 6–10 GB | P11b, gated |
+| SphericalMask env + outputs (`caoa_data/sphericalmask/`) | 11 GB on the lab share (venv 7.1, data 3.0, preds 0.7, ckpt 0.35) | done (user OK 2026-11-05) |
+| Release caches: `ours_concat__world` completions, `ours_sem_cad_bbox` embeddings | ~0.8 GiB + 2 MB, lab share | done 2026-11-06 |
 | Checkpoints | ~0.1–0.3 GB per OCAM run | ongoing |
 
 Free space at the last check: `/home` 212 GB, `/home/data` 147 GB.
