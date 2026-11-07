@@ -5,7 +5,7 @@ legacy research code. This page puts every number in the paper next to ours and 
 the per-phase notes (`docs/results/P*.md`). All tables are regenerated from the run outputs by `scripts/report.py`
 into [`results/tables.md`](results/tables.md).
 
-> **Draft (2026-11-06).** Rows marked ⏳ wait for the release runs (job 135765, expected 2026-11-06 evening).
+> **Draft (2026-11-07).** Release numbers filled in. The P10 ablation on the release inputs is running (job 135765, ~1 day).
 
 ## How we evaluate
 
@@ -57,15 +57,28 @@ fix (switch `--bn-recalibration train`): without it the model collapses in eval 
 Legacy metric, Table 1 grouping, avg / class avg. Ours: release models, class-mapped CAD retrieval with re-ranking, on
 the matched objects; the GT-instance reference is on the same objects.
 
-| Paper row | Paper | Ours | Objects evaluated |
-|---|---|---|---|
-| CAPCM+SEM-GT (GT instances + GT CAD, all objects) | 86.54 / 78.15 | ⏳ (current inputs: 83.53 ± 0.34 / 74.98 ± 1.23) | 1,864 |
-| CAPCM+SEM-SG (SoftGroup) | 76.04 / 66.84 | ⏳ | ⏳ (78% captured) |
-| CAPCM+SEM-Sph (SphericalMask) | 77.51 / 69.17 | ⏳ | ⏳ (94.5% captured) |
-| CAPCM-Sph (no SEM, single-trunk OCAM) | 75.83 / 67.45 | ⏳ | ⏳ |
-| No-completion-Sph | 60.92 / 48.63 | ⏳ | ⏳ |
+| Paper row | Paper | Ours | GT-instance reference (same OCAM, same objects) | Objects evaluated |
+|---|---|---|---|---|
+| CAPCM+SEM-GT (GT instances + GT CAD, all objects; 3 seeds) | 86.54 / 78.15 | 83.64 ± 0.28 / 75.48 ± 1.05 | — | 1,864 |
+| CAPCM+SEM-SG (SoftGroup) | 76.04 / 66.84 | 82.04 / 71.97 | 85.82 / 75.01 | 1,453 (78.0% captured) |
+| CAPCM+SEM-Sph (SphericalMask) | 77.51 / 69.17 | 82.01 / 70.86 | 83.94 / 73.47 | 1,762 (94.5% captured) |
+| CAPCM-Sph (no SEM, single-trunk OCAM) | 75.83 / 67.45 | 82.86 / 72.13 | 84.28 / 73.79 | 1,762 |
+| No-completion-Sph (single trunk, instance only) | 60.92 / 48.63 | 73.55 / 62.40 | 74.35 / 63.91 | 1,762 |
 
-SoftGroup vs SphericalMask on the objects both match (head-to-head): ⏳.
+Predicted-instance rows: seed 777; the instance source's matched objects; class-mapped retrieval, re-ranked by the OCAM.
+The release OCAM on GT instances equals the current one (83.64 ± 0.28 vs 83.53 ± 0.34 over 3 seeds), so our own CAPCM
+and SEM replace legacy's at no cost.
+
+SoftGroup vs SphericalMask on the 1,443 objects both match (head-to-head): 83.51 / 74.78 vs **84.48** / 74.45 (GT-instance
+reference 85.93 / 86.00). SphericalMask finds many more objects (1,762 vs 1,453) at about the same per-object accuracy
+(82.01 vs 82.04 on each source's own matches).
+
+- **Completion matters, as in the paper:** without it −9.3 points (73.55 vs 82.86), the paper −14.9.
+- **SEM + the Siamese CAD branch don't help in the full pipeline on the legacy metric:** CAPCM-Sph 82.86 vs CAPCM+SEM-Sph
+  82.01 (the paper: +1.7 for SEM). The Siamese OCAM sees the retrieved CAD, which is rarely the GT model (exact hit 5–7%);
+  with the GT CAD it scores 82.86 too. The single-trunk OCAM ignores the CAD, so retrieval can't hurt it. On the S2C box
+  criteria the order flips (83.48 vs 80.99): the Siamese model gets the box more often right within Scan2CAD's
+  tolerances. The ablation re-run (below) checks this over 3 seeds.
 
 Why our GT row is lower than the paper's:
 - **The GT-pose leak.** With legacy's leaky completions the same model scored ~4 points higher (P8); 86.54 used them.
@@ -97,8 +110,8 @@ GT instances, GT CAD, 1,864 objects; mean ± std over seeds 777–779. Legacy / 
 The legacy CAD-matching module is lost; the paper describes PointNet-descriptor retrieval. Ours (framework completion,
 not a contribution; user, 2026-10-29): an InfoNCE embedding of the completion + instance against all 52,472 ShapeNetV2
 models, then the OCAM aligns the top 10 and the best fit is kept. On GT instances: exact model in the top 10 for 35.7%,
-CD-L1 of the top-1 to the GT CAD 53.5 (random 91.1); after re-ranking, the S2C box criteria equal the GT CAD's
-(⏳ release numbers).
+CD-L1 of the top-1 to the GT CAD 53.5 (random 91.1); after re-ranking with the release OCAM, legacy 83.26 vs 83.10 with the GT CAD,
+S2C box 84.87 for both (stage 1 alone: 80.36 / 84.28).
 
 ## Not reproduced / out of scope
 
@@ -109,6 +122,6 @@ CD-L1 of the top-1 to the GT CAD 53.5 (random 91.1); after re-ranking, the S2C b
 
 ## Release
 
-`caoa_data/release_v1/` on the lab share (⏳): the CAPCM, SEM, OCAM (3 seeds) and retrieval checkpoints with their
-configs, results and a SHA-256 manifest, plus the ShapeNetV2 database embeddings. `scripts/align_scene.py` runs it on a
+`caoa_data/release_v1/` on the lab share (built 2026-11-07, 17 files, 814 MiB): the CAPCM, SEM, OCAM (3 seeds) and
+retrieval checkpoints with their configs, results and a SHA-256 manifest, plus the ShapeNetV2 database embeddings. `scripts/align_scene.py` runs it on a
 scan with instance predictions; see the README.

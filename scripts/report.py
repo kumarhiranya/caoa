@@ -45,6 +45,7 @@ RELEASE_POSE = [
     ("Current final model (legacy CAPCM + SEM inputs)", "siamunshared_world_comp_concat_only_emb1024"),
     ("**Release: our CAPCM + SEM inputs**", "ours_siamunshared_world_comp_concat_only_emb1024"),
 ]
+RELEASE_ABLATION = [(name, "ours_" + run) for name, run in ABLATION]  # configs/release/ablation (+ the release runs)
 P8_VARIANTS = [
     ("S2C-C completion, completion only, emb 1024", "world_comp_s2cc_only_emb1024"),
     ("S2C-C completion, completion only, emb 512", "world_comp_s2cc_only_emb512"),
@@ -258,6 +259,9 @@ def main():
                          "As the P10 final model, with completions from our concat CAPCM and embeddings from our recalibrated SEM; "
                          "mean ± std over seeds 777–779 (the full pipeline uses seed 777). The current final model (legacy CAPCM / SEM inputs) for comparison."),
         retrieval_section("ours_embed_comp_inst", "Release CAD retrieval, GT instances"),
+        ablation_section(RELEASE_ABLATION, "Release inputs: P10 ablation re-run",
+                         "The P10 ablation with completions from our concat CAPCM and our recalibrated SEM's embeddings "
+                         "(configs/release/ablation; user, 2026-11-06). Same report as the P10 table above."),
         table1_release_section(),
         p11_summary("_ours", "Release full pipeline: summary",
                     "Legacy metric in the Table 1 grouping, avg / class avg; class-mapped retrieval, re-ranked (`rerank_sum`). "
