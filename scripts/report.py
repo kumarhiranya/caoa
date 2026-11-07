@@ -198,6 +198,39 @@ def p11_summary(tag: str, title: str, note: str):
          "Final − GT-instance ref.", "Final: S2C box"], rows)
 
 
+TABLE1_RELEASE = [  # paper row, P11 tag (SphericalMask unless the row says SG), OCAM
+    ("CAPCM+SEM-SG", "softgroup", "_ours", "Siamese, separate trunks + SEM (release)"),
+    ("CAPCM+SEM-Sph", "sphericalmask", "_ours", "Siamese, separate trunks + SEM (release)"),
+    ("CAPCM-Sph", "sphericalmask", "_ours_capcm", "single trunk, completion only, no SEM (`ours_world_comp_concat_only_emb1024`)"),
+    ("No-completion-Sph", "sphericalmask", "_ours_nocomp", "single trunk, instance only, no SEM (`legacy_nocomp`)"),
+]
+
+
+def table1_release_section():
+    """Paper Table 1 next to ours (release models): the GT row on all 1,864 objects (3 seeds), the predicted-instance rows on
+    each source's matched objects, with the same OCAM on GT instances of the same objects as reference."""
+    m, n = seeded("ours_siamunshared_world_comp_concat_only_emb1024")
+    rows = []
+    if m:
+        a, c = PAPER_TABLE1["CAPCM+SEM-GT"]
+        rows.append(["CAPCM+SEM-GT", f"{a:.2f} / {c:.2f}", fmt(m["t1_micro"]) + " / " + fmt(m["t1_macro"]), "—", 1864,
+                     f"Siamese, separate trunks + SEM (release), GT instances, GT CAD, {n} seeds"])
+    for paper_row, source, tag, ocam in TABLE1_RELEASE:
+        r = load(OUT / f"p11_{source}{tag}" / "results.json")
+        if not r:
+            continue
+        a, c = PAPER_TABLE1[paper_row]
+        v, ref = r[f"{source}_class"]["rerank_sum"]["legacy_table1"], r["gt_instances"]["gt_cad"]["legacy_table1"]
+        rows.append([paper_row, f"{a:.2f} / {c:.2f}", f"{v['micro'] * 100:.2f} / {v['macro'] * 100:.2f}",
+                     f"{ref['micro'] * 100:.2f} / {ref['macro'] * 100:.2f}", r["n_matched"], ocam + "; seed 777"])
+    return ("## Release: paper Table 1 next to ours\n\nLegacy metric, Table 1 grouping, avg / class avg. Predicted-instance rows: "
+            "class-mapped retrieval re-ranked by the row's OCAM (`rerank_sum`; without completion the fit is the instance term "
+            "alone), on the S2C-C objects the source matches (conf ≥ 0.3); the reference is the same OCAM on GT instances with "
+            "the GT CAD on the same objects. Single-trunk OCAMs predict the box from the object alone, so the retrieved CAD "
+            "cannot change their legacy score (re-ranking picks the CAD only).\n\n"
+            + table(["Paper row", "Paper", "Ours", "Ours: GT-instance reference", "Objects", "OCAM"], rows))
+
+
 def paper_table1_section():
     rows = [[k, f"{a:.2f} / {c:.2f}"] for k, (a, c) in PAPER_TABLE1.items()]
     return ("## Paper Table 1 (for reference)\n\nAvg / class avg. Our counterparts: CAPCM+SEM-GT → the GT-instance ablation above "
@@ -223,8 +256,9 @@ def main():
         "# Release models: this project's own CAPCM and SEM as inputs (user, 2026-11-06)",
         ablation_section(RELEASE_POSE, "Release OCAM on GT instances",
                          "As the P10 final model, with completions from our concat CAPCM and embeddings from our recalibrated SEM; "
-                         "single seed. The current final model (legacy CAPCM / SEM inputs) for comparison."),
+                         "mean ± std over seeds 777–779 (the full pipeline uses seed 777). The current final model (legacy CAPCM / SEM inputs) for comparison."),
         retrieval_section("ours_embed_comp_inst", "Release CAD retrieval, GT instances"),
+        table1_release_section(),
         p11_summary("_ours", "Release full pipeline: summary",
                     "Legacy metric in the Table 1 grouping, avg / class avg; class-mapped retrieval, re-ranked (`rerank_sum`). "
                     "Only S2C-C objects matched by a predicted instance (IoU ≥ 0.5, conf ≥ 0.3) are evaluated; unmatched "
