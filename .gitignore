@@ -5,3 +5,7 @@ __pycache__/
 cache/
 outputs/
 configs/paths.local.yaml
+packages.json
+*.tar.zst
+release_v1/
+data/

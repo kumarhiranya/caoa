@@ -1,5 +1,7 @@
 # CAOA: Completion-Assisted Object-CAD Alignment
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24121532.svg)](https://doi.org/10.5281/zenodo.24121532)
+
 An implementation of *CAOA* (arXiv 2606.18429): align a CAD model to each object of a scanned indoor scene.
 
 1. **Instance segmentation** (SoftGroup or SphericalMask predictions) gives each object's points.
@@ -23,7 +25,8 @@ uv run pytest -q               # unit tests; the data-dependent ones skip withou
 
 ### 2. Downloads from this project
 
-Extract each archive in the repository root. They land where the default `configs/paths.yaml` expects them.
+Trained models and data are on Zenodo: [doi:10.5281/zenodo.24121532](https://doi.org/10.5281/zenodo.24121532)
+(CC BY-NC 4.0). Each archive extracts into the repository root, where the default `configs/paths.yaml` expects it.
 
 | Archive | Size | Contents |
 |---|---|---|
@@ -32,8 +35,7 @@ Extract each archive in the repository root. They land where the default `config
 | `caoa_data_v1.tar.zst` | 134 MB | `data/`: S2C-C instance ids, CAD splits, semantic embeddings, SoftGroup and SphericalMask predictions on the ScanNet val scans; `cache/`: SEM embeddings |
 
 ```bash
-tar -I zstd -xf caoa_models_v1.tar.zst      # -> release_v1/
-tar -I zstd -xf caoa_data_v1.tar.zst        # -> data/, cache/
+scripts/download.sh all data                # or: pipeline data. Downloads, checks SHA-256, extracts -> release_v1/, data/, cache/
 uv run python scripts/unpack_release.py     # links the models into outputs/ under the run names the scripts use
 ```
 
@@ -163,3 +165,25 @@ uv run python scripts/make_release.py                                           
 - `caoa/retrieval`: the retrieval embedding, search, and the retrieve–align–re-rank pipeline.
 - `caoa/inference.py`, `caoa/viz.py`: the single-scan pipeline and its plots.
 - `configs/`: `capcm/`, `ocam/` (the final model and the ablation), `retrieval/`, and the paths files.
+
+## Citation
+
+```bibtex
+@misc{kumar2026caoa_data,
+  author    = {Kumar, Hiranya},
+  title     = {{CAOA: Completion-Assisted Object-CAD Alignment} -- trained models and data},
+  year      = {2026},
+  publisher = {Zenodo},
+  version   = {1.0},
+  doi       = {10.5281/zenodo.24121532}
+}
+```
+
+Please also cite the paper (arXiv 2606.18429) and the datasets and methods this work builds on: ScanNet, ShapeNet,
+Scan2CAD, ODGNet, Point Transformer V3, SoftGroup and SphericalMask.
+
+## License
+
+Code: MIT ([`LICENSE`](LICENSE)), except the files adapted from third-party code listed in
+[`THIRD_PARTY_LICENSES.md`](THIRD_PARTY_LICENSES.md), which keep their licenses, some of them non-commercial. Trained
+models and data (Zenodo): CC BY-NC 4.0. ScanNet, ShapeNet and Scan2CAD remain under their own terms.
