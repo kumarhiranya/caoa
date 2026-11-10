@@ -1,13 +1,10 @@
-"""Per-class groupings used by the legacy reports and the paper's Table 1.
+"""Per-class groupings for the CAOA metric's tables.
 
-* "scannet_class": the pair's class under the class rule (legacy GT-instance
-  reports, `dataset.names` in `eval_pose_s2c_v2`).
-* "cad_taxonomy_name": the CAD's ShapeNet category name as the legacy SoftGroup
-  evaluation names it (`SGPredsS2CCompletionPoseVal`, custom_datasets_pose.py:6561):
-  the category's ScanNet name if it has one, else its alphabetically first name.
-* "table1": the paper's Table 1 columns, decided by the user (2026-10-20):
-  "cad_taxonomy_name" folded to bath / bookshelf / cabinet / chair / sofa / table,
-  every other category -> "other".
+* "scannet_class": the pair's class (`Pair.sem_name`).
+* "cad_taxonomy_name": the CAD's ShapeNet category name: the category's ScanNet name if it has one, else its
+  alphabetically first name.
+* "table1": the paper's Table 1 columns: "cad_taxonomy_name" folded to bath / bookshelf / cabinet / chair / sofa /
+  table, every other category -> "other".
 """
 
 import json
@@ -18,13 +15,12 @@ from caoa.paths import RESOURCES
 
 GROUPINGS = ("scannet_class", "cad_taxonomy_name", "table1")
 TABLE1_COLUMNS = {"bathtub": "bath", "bookshelf": "bookshelf", "cabinet": "cabinet", "chair": "chair", "sofa": "sofa", "table": "table"}
-# Legacy SCANNETV2_NAMES (general_utils.py), which `shapenet2scannet_name` matches against.
-_LEGACY_SCANNET_NAMES = set(SCANNET20_NAMES) | {"unannotated"}
+_SCANNET_NAMES = set(SCANNET20_NAMES) | {"unannotated"}
 
 
 @cache
 def _synset_names() -> dict[str, set[str]]:
-    """Legacy SHAPENET_SYNSET_NAME: synset -> set of its comma-separated names."""
+    """Synset -> set of its comma-separated names."""
     with open(RESOURCES / "shapenet_taxonomy.json") as f:
         return {s["synsetId"]: set(s["name"].split(",")) for s in json.load(f)}
 
@@ -32,10 +28,9 @@ def _synset_names() -> dict[str, set[str]]:
 @cache
 def cad_taxonomy_name(catid: str) -> str:
     names = _synset_names()[catid]
-    scannet = sorted(n for n in names if n in _LEGACY_SCANNET_NAMES)
-    # The legacy code returns the first match in set order; with one match that is deterministic.
+    scannet = sorted(n for n in names if n in _SCANNET_NAMES)
     if len(scannet) > 1:
-        raise ValueError(f"synset {catid} has several ScanNet names {scannet}; legacy naming would be hash-order dependent")
+        raise ValueError(f"synset {catid} has several ScanNet names {scannet}")
     return scannet[0] if scannet else sorted(names)[0]
 
 

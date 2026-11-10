@@ -1,16 +1,14 @@
-"""P12: regenerate every result table from `outputs/` into `docs/results/tables.md` (generated; commit it).
-
-Sources (missing ones are skipped and listed at the end):
-* completion (Table 2): `outputs/<run>/test_results.json` of the P7 retrains;
-* alignment on GT instances (Table 1 GT row, P8 / P10 ablation): `outputs/ab_<run>/results.json` when it exists (the
-  `--eval-only` re-evaluation with every current report key), else `outputs/<run>/results.json`; seeds `<run>_seed778`,
-  `<run>_seed779` are averaged with the original (seed 777) run: mean ± sample std over the seeds present;
-* CAD retrieval (P11d): `outputs/retrieval_embed_comp_inst/results.json`, `outputs/rerank_*/results.json`;
-* full pipeline (P11): `outputs/p11_<softgroup|sphericalmask>/{results,matching}.json`;
-* release models (user, 2026-11-06): `outputs/ours_*`, `outputs/rerank_ours_*`, `outputs/p11_<source>_ours[_common]/`.
-Leaky (GT-frame completion) runs are not reported (user, 2026-11-03).
+"""Regenerate every result table from `outputs/` into `docs/results/tables.md` (generated; commit it).
 
     uv run python scripts/report.py
+
+Sources (missing ones are skipped and listed at the end):
+* completion (Table 2): `outputs/capcm_*/test_results.json` and `train_log.json`;
+* SEM: `outputs/sem/results*.json`;
+* OCAM on GT instances: `outputs/ocam_<variant>[_seed778 | _seed779]/results.json` (mean ± sample std over the seeds);
+* CAD retrieval: `outputs/retrieval/results.json`, `outputs/rerank_retrieval__ocam_final__k10/results.json`;
+* full pipeline: `outputs/pipeline_<source>__ocam_<variant>[_seedN][_common]/{results,matching}.json`.
+Metrics: S2C box = Scan2CAD's per-object criteria on the predicted box (the headline); CAOA = the paper's metric.
 """
 
 import datetime
@@ -23,37 +21,24 @@ from caoa.paths import REPO_ROOT
 
 OUT = REPO_ROOT / "outputs"
 DST = REPO_ROOT / "docs" / "results" / "tables.md"
-SEEDS = ("", "_seed778", "_seed779")
+SEEDS = (777, 778, 779)
 MISSING = []
 
-# Paper values (docs/PLAN.md § Reproduction targets)
-PAPER_TABLE2 = {"S2C-C": (0.0602, 46.802, 25.692), "Concat SN-Indoor + S2C-C": (0.0624, 45.371, 23.744),
+PAPER_TABLE2 = {"S2C-C": (0.0602, 46.802, 25.692), "SN-Indoor + S2C-C (concat)": (0.0624, 45.371, 23.744),
                 "S2C-C + context 100 cm": (0.2152, 22.471, 2.300)}
+CAPCM = [("S2C-C", "capcm_s2cc"), ("SN-Indoor + S2C-C (concat)", "capcm_concat"), ("S2C-C + context 100 cm", "capcm_s2cc_context100")]
 PAPER_TABLE1 = {"CAPCM+SEM-GT": (86.54, 78.15), "CAPCM+SEM-SG": (76.04, 66.84), "CAPCM+SEM-Sph": (77.51, 69.17),
                 "CAPCM-Sph": (75.83, 67.45), "No-completion-Sph": (60.92, 48.63)}
-
-COMPLETION = [("S2C-C", "legacy_s2cc"), ("Concat SN-Indoor + S2C-C", "legacy_concat"), ("S2C-C + context 100 cm", "legacy_s2cc_ctxt1")]
 ABLATION = [
-    ("Baseline: completion only, no SEM", "world_comp_concat_only_emb1024"),
-    ("+ SEM", "semcad_world_comp_concat_only_emb1024"),
-    ("+ SEM + Siamese, shared trunk (paper)", "siamshared_world_comp_concat_only_emb1024"),
-    ("**+ SEM + Siamese, separate trunks (final)**", "siamunshared_world_comp_concat_only_emb1024"),
-    ("+ paper loss (t2/r3/s2 + 5 × Chamfer)", "chamfer_siamunshared_world_comp_concat_only_emb1024"),
-    ("+ paper schedule", "paperschedule_chamfer_siamunshared_world_comp_concat_only_emb1024"),
+    ("Completion only, no SEM (baseline)", "baseline"),
+    ("+ SEM", "sem"),
+    ("+ SEM + Siamese CAD branch, shared trunk (the paper's design)", "siamese_shared"),
+    ("**+ SEM + Siamese CAD branch, separate trunks (final)**", "final"),
+    ("final + the paper's loss (t2 / r3 / s2 + 5 x Chamfer)", "paper_loss"),
+    ("final + the paper's loss and schedule", "paper_schedule"),
+    ("No completion (instance points only, no SEM)", "no_completion"),
 ]
-RELEASE_POSE = [
-    ("Current final model (legacy CAPCM + SEM inputs)", "siamunshared_world_comp_concat_only_emb1024"),
-    ("**Release: our CAPCM + SEM inputs**", "ours_siamunshared_world_comp_concat_only_emb1024"),
-]
-RELEASE_ABLATION = [(name, "ours_" + run) for name, run in ABLATION]  # configs/release/ablation (+ the release runs)
-P8_VARIANTS = [
-    ("S2C-C completion, completion only, emb 1024", "world_comp_s2cc_only_emb1024"),
-    ("S2C-C completion, completion only, emb 512", "world_comp_s2cc_only_emb512"),
-    ("S2C-C completion, completion only, emb 256", "world_comp_s2cc_only_emb256"),
-    ("S2C-C completion, instance + completion, emb 1024", "world_comp_s2cc_inst_emb1024"),
-    ("Concat completion, completion only, emb 1024", "world_comp_concat_only_emb1024"),
-    ("Concat completion, instance + completion, emb 1024", "world_comp_concat_inst_emb1024"),
-]
+SOURCES = (("softgroup", "SoftGroup"), ("sphericalmask", "SphericalMask"))
 
 
 def load(path):
@@ -63,36 +48,21 @@ def load(path):
     return json.loads(path.read_text())
 
 
-def pose_metrics(run: str) -> dict | None:
-    d = load(OUT / f"ab_{run}" / "results.json") if (OUT / f"ab_{run}" / "results.json").exists() else load(OUT / run / "results.json")
-    if d is None:
+def seed_runs(name: str) -> list[str]:
+    return [name] + [f"{name}_seed{s}" for s in SEEDS[1:]]
+
+
+def mean_std(values):
+    v = np.array([x for x in values if x is not None], dtype=float)
+    if not len(v):
         return None
-    log = json.loads((OUT / run / "train_log.json").read_text()) if (OUT / run / "train_log.json").exists() else {}
-    t1 = d["legacy"]["table1"]["per_class"]["total"]
-    crit = d.get("s2c_criteria/minus_center") or d.get("matched/minus_center")
-    plain = d.get("s2c_criteria/plain") or d.get("matched/plain")
-    m = {
-        "best": max(log["s2c_total"]) if log.get("s2c_total") else np.nan,
-        "legacy": d["legacy"]["scannet_class"]["avg"]["total_acc"],
-        "t1_micro": t1["micro_avg"], "t1_macro": t1["macro_avg"],
-        "c_inst": crit["instance_mean"], "c_class": crit["class_mean"], "plain": plain["instance_mean"],
-    }
-    box = d.get("s2c_box")
-    m["box_inst"], m["box_class"] = (box["instance_mean"], box["class_mean"]) if box else (np.nan, np.nan)
-    return m
+    return v.mean(), (v.std(ddof=1) if len(v) > 1 else np.nan), len(v)
 
 
-def seeded(run: str):
-    runs = [m for m in (pose_metrics(run + s) if (OUT / (run + s)).exists() or s == "" else None for s in SEEDS) if m]
-    if not runs:
-        return None, 0
-    return {k: (np.nanmean([r[k] for r in runs]), np.nanstd([r[k] for r in runs], ddof=1) if len(runs) > 1 else np.nan) for k in runs[0]}, len(runs)
-
-
-def fmt(mean_std, scale=100, digits=2):
-    m, s = mean_std
-    if np.isnan(m):
+def fmt(ms, scale=100, digits=2):
+    if ms is None:
         return "—"
+    m, s, _ = ms
     return f"{m * scale:.{digits}f}" + (f" ± {s * scale:.{digits}f}" if not np.isnan(s) else "")
 
 
@@ -102,174 +72,203 @@ def table(header, rows):
     return "\n".join(out)
 
 
+# --- completion -----------------------------------------------------------------------------------------------------
+
 def completion_section():
     rows = []
-    for name, run in COMPLETION:
+    for name, run in CAPCM:
         d = load(OUT / run / "test_results.json")
         if d is None:
             continue
-        t, v = d["test"], d["validate"]
+        t = d["test"]
+        log = load(OUT / run / "train_log.json") or []
+        vals = [(e["epoch"], e["validate"]) for e in log if "validate" in e]
+        best = min(vals, key=lambda x: x[1]["CDL1"]) if vals else None
         paper = PAPER_TABLE2[name]
-        rows.append([name, f"{t['F-Score']:.4f} / {t['CDL1']:.2f} / {t['CDL2']:.2f}", f"{v['F-Score']:.4f} / {v['CDL1']:.2f} / {v['CDL2']:.2f}",
+        rows.append([name, f"{t['F-Score']:.4f} / {t['CDL1']:.2f} / {t['CDL2']:.2f}",
+                     f"{best[1]['F-Score']:.4f} / {best[1]['CDL1']:.2f} / {best[1]['CDL2']:.2f} (epoch {best[0]})" if best else "—",
                      f"{paper[0]:.4f} / {paper[1]:.2f} / {paper[2]:.2f}"])
-    return ("## Table 2: completion (CAPCM retrains, P7)\n\nF-Score / CDL1 / CDL2 (×1000) on the S2C-C val split (1,744 samples). "
-            "Test = legacy `test()` aggregation on ckpt-best; validation = legacy `validate()` (class-averaged), best epoch. The paper's "
-            "context row is a best-validation value.\n\n"
+    return ("## Completion (paper Table 2)\n\nF-Score / CDL1 / CDL2 (x 1000) on the S2C-C val split (1,744 samples). Test = the "
+            "`test()` aggregation on ckpt-best; validation = `validate()` (class-averaged), best epoch. The paper's context "
+            "row is a best-validation value.\n\n"
             + table(["Training data", "Ours: test", "Ours: best validation", "Paper"], rows))
 
 
-def ablation_section(entries, title, note):
+def sem_section():
     rows = []
-    for name, run in entries:
-        m, n = seeded(run)
+    for f, label in (("results.json", "training run"), ("results_eval_only.json", "released weights")):
+        d = load(OUT / "sem" / f)
+        if not d:
+            continue
+        for key, what in (("final", "statistics from training"), ("final_recalibrated", "BatchNorm recalibrated")):
+            if key in d:
+                r = d[key]
+                rows.append([f"{label}, {what}", f"{r['accuracy_all'] * 100:.1f}", f"{r['macro_f1_all'] * 100:.1f}", r["n_all"]])
+    return ("## Symmetry embedding module (SEM)\n\nSymmetric / not symmetric on the val pairs' CADs (whole val set).\n\n"
+            + table(["SEM", "Accuracy", "Macro-F1", "Samples"], rows))
+
+
+# --- OCAM on GT instances -------------------------------------------------------------------------------------------
+
+def ocam_metrics(run: str) -> dict | None:
+    d = load(OUT / run / "results.json")
+    if d is None:
+        return None
+    t1 = d["caoa"]["table1"]["per_class"]["total"]
+    return {"box_inst": d["s2c_box"]["instance_mean"], "box_class": d["s2c_box"]["class_mean"],
+            "caoa": d["caoa"]["scannet_class"]["avg"]["total_acc"], "t1_micro": t1["micro_avg"], "t1_macro": t1["macro_avg"],
+            "crit": d["s2c_criteria/minus_center"]["instance_mean"]}
+
+
+def ocam_seeds(variant: str):
+    runs = [m for m in (ocam_metrics(r) for r in seed_runs(f"ocam_{variant}") if (OUT / r).exists() or r == f"ocam_{variant}") if m]
+    if not runs:
+        return None, 0
+    return {k: mean_std([r[k] for r in runs]) for k in runs[0]}, len(runs)
+
+
+def ablation_section():
+    rows = []
+    for name, variant in ABLATION:
+        m, n = ocam_seeds(variant)
         if m is None:
             continue
-        rows.append([name, n, fmt(m["best"], digits=1), fmt(m["legacy"]), fmt(m["t1_micro"]) + " / " + fmt(m["t1_macro"]),
-                     fmt(m["c_inst"]) + " / " + fmt(m["c_class"]), fmt(m["plain"]), fmt(m["box_inst"]) + " / " + fmt(m["box_class"])])
-    return f"## {title}\n\n{note}\n\n" + table(
-        ["Run", "Seeds", "Legacy best (training)", "Legacy final", "Table 1 grouping: avg / class avg", "S2C criteria −center",
-         "S2C criteria plain", "S2C box"], rows)
+        rows.append([name, n, fmt(m["box_inst"]) + " / " + fmt(m["box_class"]), fmt(m["caoa"]),
+                     fmt(m["t1_micro"]) + " / " + fmt(m["t1_macro"]), fmt(m["crit"])])
+    return ("## OCAM design (GT instances, GT CAD)\n\n1,864 val objects; mean ± std over seeds 777–779. S2C box: instance / "
+            "class mean (Scan2CAD categories). CAOA: all objects, and in the paper's Table 1 grouping (avg / class avg). "
+            "S2C criteria: on the GT CAD placed by the predicted box (−center convention).\n\n"
+            + table(["OCAM", "Seeds", "S2C box", "CAOA", "CAOA, Table 1 grouping", "S2C criteria"], rows))
 
 
-def retrieval_section(run: str = "retrieval_embed_comp_inst", title: str = "CAD retrieval over ShapeNetV2 (P11d), GT instances"):
-    d = load(OUT / run / "results.json")
-    lines = [f"## {title}", ""]
-    if d:
-        rows = [[mode, f"{v['recall@1'] * 100:.1f} / {v['recall@10'] * 100:.1f} / {v['recall@50'] * 100:.1f}", f"{v['rank_median']:.0f}",
-                 f"{v['category_acc'] * 100:.1f}", f"{v['cd_l1']:.1f} ({v['random_cd_l1']:.1f})"]
-                for mode, v in d.items() if isinstance(v, dict) and "recall@1" in v]
-        lines += ["Stage 1 (embedding), 1,864 val objects, 52,472 database CADs.", "",
-                  table(["Search / yaw averaging", "Exact recall @1 / @10 / @50", "Median GT rank", "Category acc.", "CD-L1 top-1 vs GT (random)"], rows), ""]
-    for f in sorted(OUT.glob(f"rerank_{run}__*k10/results.json")):
-        r = json.loads(f.read_text())
-        rows = [[name, f"{v['exact_hit'] * 100:.1f}", f"{v['cd_l1_to_gt']:.1f}", f"{v['legacy_total_acc'] * 100:.2f}",
-                 f"{v['s2c_criteria']['minus_center']['instance_mean'] * 100:.2f}",
-                 f"{v['s2c_box']['instance_mean'] * 100:.2f} / {v['s2c_box']['class_mean'] * 100:.2f}"]
-                for name, v in r.items() if isinstance(v, dict)]
-        lines += [f"Stage 2 (`{f.parent.name}`), k = {r['k']}.", "",
-                  table(["Selection", "Exact hit", "CD-L1 to GT CAD", "Legacy", "S2C criteria −center", "S2C box"], rows), ""]
-    return "\n".join(lines)
+# --- full pipeline --------------------------------------------------------------------------------------------------
+
+def pipeline_dir(source, variant, seed=777, common=False):
+    return OUT / (f"pipeline_{source}__ocam_{variant}" + ("" if seed == 777 else f"_seed{seed}") + ("_common" if common else ""))
 
 
-def p11_section(source: str, title: str, tag: str = "", heading: str = ""):
-    r, m = load(OUT / f"p11_{source}{tag}" / "results.json"), load(OUT / f"p11_{source}{tag}" / "matching.json")
-    lines = [f"## {heading or f'Full pipeline on {title} instances (P11)'}", ""]
+def pipeline_values(source, variant, common=False):
+    """Over the seeds present: {final, gt_cad, ref} x {box inst/class, CAOA Table 1 micro/macro}, plus n."""
+    out = []
+    for seed in SEEDS:
+        d = pipeline_dir(source, variant, seed, common)
+        r = load(d / "results.json") if d.exists() or seed == 777 else None
+        if not r:
+            continue
+        sel = {"final": r[f"{source}_class"]["rerank_sum"], "gt_cad": r[f"{source}_class"]["gt_cad"], "ref": r["gt_instances"]["gt_cad"]}
+        out.append({"n": r["n_matched"], **{f"{k}_{m}": v for k, s in sel.items() for m, v in (
+            ("box_inst", s["s2c_box"]["instance_mean"]), ("box_class", s["s2c_box"]["class_mean"]),
+            ("t1_micro", s["caoa_table1"]["micro"]), ("t1_macro", s["caoa_table1"]["macro"]))}})
+    if not out:
+        return None, 0
+    return {k: mean_std([o[k] for o in out]) for k in out[0]}, len(out)
+
+
+def table1_section():
+    m, n = ocam_seeds("final")
+    rows = []
+    if m:
+        a, c = PAPER_TABLE1["CAPCM+SEM-GT"]
+        rows.append(["CAPCM+SEM-GT", f"{a:.2f} / {c:.2f}", fmt(m["box_inst"]) + " / " + fmt(m["box_class"]),
+                     fmt(m["t1_micro"]) + " / " + fmt(m["t1_macro"]), "—", "1,864 (all)", f"final, {n}"])
+    for paper_row, source, variant in (("CAPCM+SEM-SG", "softgroup", "final"), ("CAPCM+SEM-Sph", "sphericalmask", "final"),
+                                       ("CAPCM-Sph", "sphericalmask", "baseline"), ("No-completion-Sph", "sphericalmask", "no_completion")):
+        v, n = pipeline_values(source, variant)
+        if v is None:
+            continue
+        a, c = PAPER_TABLE1[paper_row]
+        rows.append([paper_row, f"{a:.2f} / {c:.2f}", fmt(v["final_box_inst"]) + " / " + fmt(v["final_box_class"]),
+                     fmt(v["final_t1_micro"]) + " / " + fmt(v["final_t1_macro"]),
+                     fmt(v["ref_box_inst"]) + " / " + fmt(v["ref_box_class"]), f"{int(v['n'][0]):,}", f"{variant}, {n}"])
+    return ("## Paper Table 1: alignment\n\nOurs: S2C box (instance / class mean) and the CAOA metric in the paper's Table 1 "
+            "grouping (avg / class avg; the paper's column uses this metric). Predicted-instance rows: the S2C-C objects the "
+            "source matches (IoU >= 0.5, conf >= 0.3); class-mapped CAD retrieval, re-ranked by the OCAM; the reference is the "
+            "same OCAM on GT instances with the GT CAD, on the same objects. Mean ± std over the seeds.\n\n"
+            + table(["Paper row", "Paper", "Ours: S2C box", "Ours: CAOA", "Reference: S2C box", "Objects", "OCAM, seeds"], rows))
+
+
+def head_to_head_section():
+    rows = []
+    for source, name in SOURCES:
+        for common, objects in ((False, "own matches"), (True, "matched by both")):
+            v, n = pipeline_values(source, "final", common)
+            if v is None:
+                continue
+            rows.append([name, objects, f"{int(v['n'][0]):,}", fmt(v["final_box_inst"]) + " / " + fmt(v["final_box_class"]),
+                         fmt(v["gt_cad_box_inst"]), fmt(v["ref_box_inst"]), fmt(v["final_t1_micro"]) + " / " + fmt(v["final_t1_macro"]), n])
+    return ("## SoftGroup vs SphericalMask\n\nFinal OCAM. Each source on its own matched objects, and both on the objects both "
+            "match. S2C box (instance / class mean) with retrieval (final), with the GT CAD, and with GT instances (reference); "
+            "CAOA in the Table 1 grouping. Mean ± std over the seeds.\n\n"
+            + table(["Instances", "Objects", "N", "S2C box: final", "S2C box: GT CAD", "S2C box: GT instances", "CAOA: final", "Seeds"], rows))
+
+
+def pipeline_detail_section(source, title):
+    d = pipeline_dir(source, "final")
+    r, m = load(d / "results.json"), load(d / "matching.json")
+    lines = [f"## Full pipeline on {title} instances (final OCAM, seed 777)", ""]
     if m:
         rows = []
         for t, v in m.items():
             if t == "matched_objects":
                 continue
             det = v.get("detection", {})
-            rows.append([t, f"{v['capture'] * 100:.1f}", v["n_predictions"],
-                         (f"{det['precision'] * 100:.1f} / {det['recall'] * 100:.1f} / {det['f1']:.3f}" if det else "—")])
-        lines += [table(["Confidence ≥", "Capture of S2C-C objects (%)", "Predictions", "Detection vs ScanNet: precision / recall / F1"], rows), ""]
+            rows.append([t, f"{v['capture'] * 100:.1f}", f"{v['n_matched']:,}", f"{v['n_predictions']:,}",
+                         f"{det['precision'] * 100:.1f} / {det['recall'] * 100:.1f} / {det['f1']:.3f}" if det else "—"])
+        lines += [table(["Confidence >=", "Capture of S2C-C objects (%)", "Matched", "Predictions",
+                         "Detection vs ScanNet: precision / recall / F1"], rows), ""]
     if r:
         rows = []
         for row, label in (("gt_instances", "GT instances"), (f"{source}_class", f"{title}, class-mapped retrieval"),
                            (f"{source}_all", f"{title}, all-category retrieval")):
             for name, v in r.get(row, {}).items():
-                if row != "gt_instances" and name not in ("gt_cad", "stage1", "rerank_sum"):
+                if row != "gt_instances" and name not in ("gt_cad", "stage1", "rerank_sum", "oracle_topk"):
                     continue
-                t1 = v.get("legacy_table1")
-                rows.append([label, name, f"{v['legacy_total_acc'] * 100:.2f}", f"{t1['micro'] * 100:.2f} / {t1['macro'] * 100:.2f}" if t1 else "—",
+                rows.append([label, name, f"{v['s2c_box']['instance_mean'] * 100:.2f} / {v['s2c_box']['class_mean'] * 100:.2f}",
+                             f"{v['caoa_table1']['micro'] * 100:.2f} / {v['caoa_table1']['macro'] * 100:.2f}",
                              f"{v['s2c_criteria']['minus_center']['instance_mean'] * 100:.2f}",
-                             f"{v['s2c_box']['instance_mean'] * 100:.2f} / {v['s2c_box']['class_mean'] * 100:.2f}"])
-        lines += [f"Alignment on the {r['n_matched']} matched instances (conf ≥ {r['conf']}).", "",
-                  table(["Instances", "CAD", "Legacy", "Table 1 grouping: avg / class avg", "S2C criteria −center", "S2C box"], rows)]
+                             f"{v['category_acc'] * 100:.1f}", f"{v['cd_l1_to_gt']:.1f}"])
+        lines += [f"Alignment on the {r['n_matched']:,} matched objects (conf >= {r['conf']}). `rerank_sum`: the final selection; "
+                  "`oracle_topk`: the top-k candidate closest to the GT CAD.", "",
+                  table(["Instances", "CAD", "S2C box", "CAOA, Table 1 grouping", "S2C criteria", "Category correct (%)", "CD-L1 to GT CAD"], rows)]
     return "\n".join(lines)
 
 
-def p11_summary(tag: str, title: str, note: str):
-    """One row per instance source and object set: the source's own matched objects, and the objects both sources match."""
-    rows = []
-    for source, name in (("softgroup", "SoftGroup"), ("sphericalmask", "SphericalMask")):
-        for suffix, objects in (("", "own matches"), ("_common", "matched by both")):
-            r = load(OUT / f"p11_{source}{tag}{suffix}" / "results.json")
-            if not r:
-                continue
-            ref = r["gt_instances"]["gt_cad"]
-            cells = [name, objects, r["n_matched"]]
-            for v in (ref, r[f"{source}_class"]["rerank_sum"], r[f"{source}_class"]["gt_cad"]):
-                cells.append(f"{v['legacy_table1']['micro'] * 100:.2f} / {v['legacy_table1']['macro'] * 100:.2f}")
-            cells.append(f"{(r[f'{source}_class']['rerank_sum']['legacy_table1']['micro'] - ref['legacy_table1']['micro']) * 100:+.2f}")
-            cells.append(f"{r[f'{source}_class']['rerank_sum']['s2c_box']['instance_mean'] * 100:.2f}")
-            rows.append(cells)
-    return f"## {title}\n\n{note}\n\n" + table(
-        ["Instances", "Objects", "N", "GT instances + GT CAD", "Predicted + retrieval (final)", "Predicted + GT CAD",
-         "Final − GT-instance ref.", "Final: S2C box"], rows)
+# --- retrieval ------------------------------------------------------------------------------------------------------
 
-
-TABLE1_RELEASE = [  # paper row, P11 tag (SphericalMask unless the row says SG), OCAM
-    ("CAPCM+SEM-SG", "softgroup", "_ours", "Siamese, separate trunks + SEM (release)"),
-    ("CAPCM+SEM-Sph", "sphericalmask", "_ours", "Siamese, separate trunks + SEM (release)"),
-    ("CAPCM-Sph", "sphericalmask", "_ours_capcm", "single trunk, completion only, no SEM (`ours_world_comp_concat_only_emb1024`)"),
-    ("No-completion-Sph", "sphericalmask", "_ours_nocomp", "single trunk, instance only, no SEM (`legacy_nocomp`)"),
-]
-
-
-def table1_release_section():
-    """Paper Table 1 next to ours (release models): the GT row on all 1,864 objects (3 seeds), the predicted-instance rows on
-    each source's matched objects, with the same OCAM on GT instances of the same objects as reference."""
-    m, n = seeded("ours_siamunshared_world_comp_concat_only_emb1024")
-    rows = []
-    if m:
-        a, c = PAPER_TABLE1["CAPCM+SEM-GT"]
-        rows.append(["CAPCM+SEM-GT", f"{a:.2f} / {c:.2f}", fmt(m["t1_micro"]) + " / " + fmt(m["t1_macro"]), "—", 1864,
-                     f"Siamese, separate trunks + SEM (release), GT instances, GT CAD, {n} seeds"])
-    for paper_row, source, tag, ocam in TABLE1_RELEASE:
-        r = load(OUT / f"p11_{source}{tag}" / "results.json")
-        if not r:
-            continue
-        a, c = PAPER_TABLE1[paper_row]
-        v, ref = r[f"{source}_class"]["rerank_sum"]["legacy_table1"], r["gt_instances"]["gt_cad"]["legacy_table1"]
-        rows.append([paper_row, f"{a:.2f} / {c:.2f}", f"{v['micro'] * 100:.2f} / {v['macro'] * 100:.2f}",
-                     f"{ref['micro'] * 100:.2f} / {ref['macro'] * 100:.2f}", r["n_matched"], ocam + "; seed 777"])
-    return ("## Release: paper Table 1 next to ours\n\nLegacy metric, Table 1 grouping, avg / class avg. Predicted-instance rows: "
-            "class-mapped retrieval re-ranked by the row's OCAM (`rerank_sum`; without completion the fit is the instance term "
-            "alone), on the S2C-C objects the source matches (conf ≥ 0.3); the reference is the same OCAM on GT instances with "
-            "the GT CAD on the same objects. Single-trunk OCAMs predict the box from the object alone, so the retrieved CAD "
-            "cannot change their legacy score (re-ranking picks the CAD only).\n\n"
-            + table(["Paper row", "Paper", "Ours", "Ours: GT-instance reference", "Objects", "OCAM"], rows))
-
-
-def paper_table1_section():
-    rows = [[k, f"{a:.2f} / {c:.2f}"] for k, (a, c) in PAPER_TABLE1.items()]
-    return ("## Paper Table 1 (for reference)\n\nAvg / class avg. Our counterparts: CAPCM+SEM-GT → the GT-instance ablation above "
-            "(Table 1 grouping column); CAPCM+SEM-SG → the SoftGroup rows of P11; CAPCM+SEM-Sph → the "
-            "SphericalMask rows (official checkpoint, run 2026-11-05).\n\n" + table(["Paper row", "Avg / class avg"], rows))
+def retrieval_section():
+    d = load(OUT / "retrieval" / "results.json")
+    lines = ["## CAD retrieval (GT instances)", ""]
+    if d:
+        rows = [[mode, f"{v['recall@1'] * 100:.1f} / {v['recall@10'] * 100:.1f} / {v['recall@50'] * 100:.1f}", f"{v['rank_median']:.0f}",
+                 f"{v['category_acc'] * 100:.1f}", f"{v['cd_l1']:.1f} ({v['random_cd_l1']:.1f})"]
+                for mode, v in d.items() if isinstance(v, dict) and "recall@1" in v]
+        lines += ["Stage 1 (embedding): 1,864 val objects against 52,472 ShapeNetV2 models. Search: the GT CAD's synset (same) or all; "
+                  "yaw1 / yaw8: query embedding from 1 or averaged over 8 yaw rotations.", "",
+                  table(["Search / yaw", "Exact recall @1 / @10 / @50", "Median GT rank", "Category acc.", "CD-L1 top-1 to GT (random)"], rows), ""]
+    r = load(OUT / "rerank_retrieval__ocam_final__k10" / "results.json")
+    if r:
+        rows = [[name, f"{v['exact_hit'] * 100:.1f}", f"{v['cd_l1_to_gt']:.1f}",
+                 f"{v['s2c_box']['instance_mean'] * 100:.2f} / {v['s2c_box']['class_mean'] * 100:.2f}",
+                 f"{v['caoa_total_acc'] * 100:.2f}", f"{v['s2c_criteria']['minus_center']['instance_mean'] * 100:.2f}"]
+                for name, v in r.items() if isinstance(v, dict)]
+        lines += [f"Stage 2: the final OCAM aligns the top {r['k']} (same synset, yaw8) and the best fit is kept (`rerank_sum`).", "",
+                  table(["Selection", "Exact hit", "CD-L1 to GT CAD", "S2C box", "CAOA", "S2C criteria"], rows)]
+    return "\n".join(lines)
 
 
 def main():
     commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True, cwd=REPO_ROOT).stdout.strip()
     sections = [
-        f"# Result tables\n\nGenerated by `scripts/report.py` from `outputs/` on {datetime.date.today()} (commit {commit}). Do not edit by hand. "
-        "Accuracies in %. All alignment numbers use leak-free completions; mean ± sample std over the seeds present.",
+        f"# Result tables\n\nGenerated by `scripts/report.py` from `outputs/` on {datetime.date.today()} (commit {commit}). "
+        "Do not edit by hand. Accuracies in %; mean ± sample std over the seeds present.",
+        table1_section(),
+        head_to_head_section(),
+        ablation_section(),
         completion_section(),
-        ablation_section(ABLATION, "Alignment on GT instances: P10 ablation (Table 1 GT row)",
-                         "Concat completions (leak-free), completion only, emb 1024; 1,864 val objects. Legacy = `scannet_class` micro of "
-                         "`model_final`; S2C criteria / box: instance / class mean."),
-        ablation_section(P8_VARIANTS, "Alignment on GT instances: completion variants without SEM (P8, leak-free)",
-                         "Same report; single runs unless seeds were added."),
-        paper_table1_section(),
+        sem_section(),
         retrieval_section(),
-        p11_section("softgroup", "SoftGroup"),
-        p11_section("sphericalmask", "SphericalMask"),
-        "# Release models: this project's own CAPCM and SEM as inputs (user, 2026-11-06)",
-        ablation_section(RELEASE_POSE, "Release OCAM on GT instances",
-                         "As the P10 final model, with completions from our concat CAPCM and embeddings from our recalibrated SEM; "
-                         "mean ± std over seeds 777–779 (the full pipeline uses seed 777). The current final model (legacy CAPCM / SEM inputs) for comparison."),
-        retrieval_section("ours_embed_comp_inst", "Release CAD retrieval, GT instances"),
-        ablation_section(RELEASE_ABLATION, "Release inputs: P10 ablation re-run",
-                         "The P10 ablation with completions from our concat CAPCM and our recalibrated SEM's embeddings "
-                         "(configs/release/ablation; user, 2026-11-06). Same report as the P10 table above."),
-        table1_release_section(),
-        p11_summary("_ours", "Release full pipeline: summary",
-                    "Legacy metric in the Table 1 grouping, avg / class avg; class-mapped retrieval, re-ranked (`rerank_sum`). "
-                    "Only S2C-C objects matched by a predicted instance (IoU ≥ 0.5, conf ≥ 0.3) are evaluated; unmatched "
-                    "predictions and objects are not failures. Each source on its own matches (main view, with the GT-instance "
-                    "reference on the same objects), and both on the objects both match (the head-to-head comparison)."),
-        p11_section("softgroup", "SoftGroup", "_ours", "Release full pipeline on SoftGroup instances"),
-        p11_section("sphericalmask", "SphericalMask", "_ours", "Release full pipeline on SphericalMask instances"),
+        pipeline_detail_section("softgroup", "SoftGroup"),
+        pipeline_detail_section("sphericalmask", "SphericalMask"),
     ]
     if MISSING:
         sections.append("## Missing sources\n\n" + "\n".join(f"- `{m}`" for m in sorted(set(MISSING))))

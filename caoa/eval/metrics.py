@@ -1,25 +1,18 @@
-"""Per-object alignment errors and pass/fail flags (translation / rotation / scale).
+"""Per-object alignment errors and pass/fail flags (translation / rotation / scale; 20 cm-or-units / 20 deg / 20 %).
 
-This scores each object against its own target, with no matching and no
-missed objects; it is a training-time proxy. Reported results use the full
-benchmark protocol in `caoa.eval.scan2cad_benchmark`.
+Each object is scored against its own target. Two scoring rules, selected per component:
 
-Two scoring rules are implemented, selected per component:
-
-* "scan2cad": the per-object formulas of the official Scan2CAD benchmark
-  (shared with `scan2cad_benchmark`): quaternion angle minimised over the
-  symmetry-equivalent ground truths, scale error |mean(s_pred / s_gt) - 1|,
+* "scan2cad": the per-object formulas of the official Scan2CAD benchmark (shared with `scan2cad_benchmark`):
+  quaternion angle minimised over the symmetry-equivalent ground truths, scale error |mean(s_pred / s_gt) - 1|,
   every comparison inclusive (<=).
-* "legacy": what `utils/eval_utils.calc_pose_accuracy_s2c_nocls` in the legacy
-  code computed, kept so the old numbers can be reproduced:
-    - quaternions (w, x, y, z) were handed to scipy, which reads (x, y, z, w);
-    - the error was |xyz Euler angles| of the relative rotation, reduced with
-      max() for asymmetric objects but with min() over all components of all
-      symmetric candidates for symmetric ones;
-    - scale error mean(|s_pred / s_gt - 1|); translation and scale use <.
+* "caoa": the CAOA metric, the one the paper's alignment numbers use (`MetricConfig.caoa`):
+    - the rotation error is |xyz Euler angles| of the relative rotation, computed from (w, x, y, z) quaternions that
+      are read in scipy's (x, y, z, w) order; reduced with max() for asymmetric objects and with min() over all
+      components of all symmetry-equivalent targets for symmetric ones;
+    - scale error mean(|s_pred / s_gt - 1|); translation and scale use strict <.
 
-Translation units are whatever frame the poses are expressed in; the legacy
-evaluation normalises each object to unit size first (see the pose dataset).
+Translation units are those of the frame the poses are expressed in; the CAOA metric is computed in the pose
+dataset's normalised frame (each object scaled to unit size), so its 0.2 is 20 % of the object's size.
 """
 
 import warnings
@@ -36,20 +29,20 @@ SYMMETRY_ORDER = scan2cad_benchmark.SYMMETRY_ORDER
 
 @dataclass(frozen=True)
 class MetricConfig:
-    rotation: str = "scan2cad"  # "scan2cad" | "legacy"
-    scale: str = "scan2cad"  # "scan2cad" | "legacy"
-    strict_thresholds: bool = False  # legacy compared translation and scale with <, not <=
+    rotation: str = "scan2cad"  # "scan2cad" | "caoa"
+    scale: str = "scan2cad"  # "scan2cad" | "caoa"
+    strict_thresholds: bool = False  # the CAOA metric compares translation and scale with <, not <=
     translation_threshold: float = scan2cad_benchmark.THRESHOLD_TRANSLATION
     rotation_threshold_deg: float = scan2cad_benchmark.THRESHOLD_ROTATION
     scale_threshold_pct: float = scan2cad_benchmark.THRESHOLD_SCALE
 
     @classmethod
-    def legacy(cls, **overrides):
-        return cls(rotation="legacy", scale="legacy", strict_thresholds=True, **overrides)
+    def caoa(cls, **overrides):
+        return cls(rotation="caoa", scale="caoa", strict_thresholds=True, **overrides)
 
 
-def _legacy_euler_diff(R_pred: np.ndarray, R_target: np.ndarray) -> np.ndarray:
-    # Reproduces the legacy argument-order bug: w-first quaternions read as x, y, z, w.
+def _caoa_euler_diff(R_pred: np.ndarray, R_target: np.ndarray) -> np.ndarray:
+    # The CAOA metric's convention: w-first quaternions read as x, y, z, w.
     pred = Rotation.from_quat(matrix_to_quat(R_pred)).as_matrix()
     target = Rotation.from_quat(matrix_to_quat(R_target)).as_matrix()
     with warnings.catch_warnings():
@@ -62,9 +55,9 @@ def rotation_error_deg(R_pred: np.ndarray, R_gt: np.ndarray, sym: str, mode: str
     R_pred = nearest_rotation(R_pred)
     if mode == "scan2cad":
         return scan2cad_benchmark.rotation_error_deg(matrix_to_quat(R_pred), matrix_to_quat(R_gt), sym)
-    if mode == "legacy":
+    if mode == "caoa":
         m = SYMMETRY_ORDER.get(sym, 1)
-        diffs = [_legacy_euler_diff(R_pred, R_gt @ yaw_matrix(2.0 * np.pi * i / m)) for i in range(m)]
+        diffs = [_caoa_euler_diff(R_pred, R_gt @ yaw_matrix(2.0 * np.pi * i / m)) for i in range(m)]
         return float(np.min(diffs)) if sym in SYMMETRY_ORDER else float(diffs[0].max())
     raise ValueError(f"unknown rotation mode {mode!r}")
 
@@ -72,7 +65,7 @@ def rotation_error_deg(R_pred: np.ndarray, R_gt: np.ndarray, sym: str, mode: str
 def scale_error_pct(s_pred: np.ndarray, s_gt: np.ndarray, mode: str = "scan2cad") -> np.ndarray:
     if mode == "scan2cad":
         return 100.0 * np.abs(np.mean(s_pred / s_gt, axis=-1) - 1.0)
-    if mode == "legacy":
+    if mode == "caoa":
         return 100.0 * np.mean(np.abs(s_pred / (s_gt + 1e-4) - 1.0), axis=-1)
     raise ValueError(f"unknown scale mode {mode!r}")
 

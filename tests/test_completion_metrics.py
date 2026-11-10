@@ -1,4 +1,4 @@
-"""Parity of the legacy completion evaluation (E9): metric definitions and runner aggregation."""
+"""Completion metrics: definitions and aggregation."""
 
 import numpy as np
 import pytest
@@ -6,23 +6,25 @@ import torch
 from scipy.spatial import cKDTree
 
 from caoa.eval import completion_metrics as cm
-from tests import legacy_ref
 
 
-def test_aggregation_matches_legacy_runner():
+def test_aggregation():
+    """validate(): mean of per-category means; test(): (sum of samples + sum of category means) / (n + n_categories)."""
     rng = np.random.default_rng(0)
     samples = [(str(rng.choice(["03001627", "04379243", "02871439"])), rng.uniform(0, 50, 3).tolist()) for _ in range(57)]
     ev = cm.CompletionEvaluator()
     for tax, values in samples:
         ev.update(tax, values)
     s = ev.summary()
-    ref_val, ref_cat = legacy_ref.odgnet_validate_aggregate(samples)
-    ref_test = legacy_ref.odgnet_test_aggregate(samples)
-    np.testing.assert_allclose([s["validate"][k] for k in cm.METRIC_NAMES], ref_val, rtol=1e-12)
-    np.testing.assert_allclose([s["test"][k] for k in cm.METRIC_NAMES], ref_test, rtol=1e-12)
-    for tax, (count, avg) in ref_cat.items():
-        assert s["per_category"][tax]["count"] == count
-        np.testing.assert_allclose([s["per_category"][tax][k] for k in cm.METRIC_NAMES], avg, rtol=1e-12)
+    cats = sorted({t for t, _ in samples})
+    cat_mean = {c: np.mean([v for t, v in samples if t == c], axis=0) for c in cats}
+    values = np.array([v for _, v in samples])
+    np.testing.assert_allclose([s["validate"][k] for k in cm.METRIC_NAMES], np.mean([cat_mean[c] for c in cats], axis=0), rtol=1e-12)
+    np.testing.assert_allclose([s["test"][k] for k in cm.METRIC_NAMES],
+                               (values.sum(0) + sum(cat_mean.values())) / (len(samples) + len(cats)), rtol=1e-12)
+    for c in cats:
+        assert s["per_category"][c]["count"] == sum(t == c for t, _ in samples)
+        np.testing.assert_allclose([s["per_category"][c][k] for k in cm.METRIC_NAMES], cat_mean[c], rtol=1e-12)
 
 
 def test_sample_metrics_match_reference_definitions():
@@ -43,5 +45,5 @@ def test_sample_metrics_match_reference_definitions():
 def test_ignore_zeros_drops_zero_sum_points_at_batch_size_1():
     gt = torch.tensor([[[0.1, -0.1, 0.0], [0.5, 0.5, 0.5]]])
     pred = torch.tensor([[[0.5, 0.5, 0.5]]])
-    # The (0.1, -0.1, 0) point sums to 0, so legacy ignore_zeros drops it: perfect match.
+    # The (0.1, -0.1, 0) point sums to 0, so ignore_zeros drops it: perfect match.
     assert cm.sample_metrics(pred, gt)[1] == pytest.approx(0.0, abs=1e-9)

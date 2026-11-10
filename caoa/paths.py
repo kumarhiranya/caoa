@@ -15,11 +15,12 @@ class Paths:
     scannet_scans: Path
     shapenet: Path
     s2c_annotations: Path
+    s2c_cad_splits: Path
     scan2cad_full_annotations: Path
     scan2cad_cad_appearances: Path
-    legacy_repo: Path
     semantic_embeddings: Path
-    legacy_results: Path
+    softgroup_preds: Path
+    sphericalmask_preds: Path
     cache: Path
 
 

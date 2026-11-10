@@ -21,8 +21,7 @@ def matrix_to_quat(R) -> np.ndarray:
 def nearest_rotation(M) -> np.ndarray:
     """Closest proper rotation to a 3x3 matrix in Frobenius norm (SVD projection).
 
-    Same result as numpy-quaternion's Bar-Itzhack conversion, which the legacy
-    code relied on for its unconstrained 9-value rotation outputs.
+    Same result as numpy-quaternion's Bar-Itzhack conversion; used on the OCAM's unconstrained 9-value rotation outputs.
     """
     U, _, Vt = np.linalg.svd(M)
     D = np.diag([1.0, 1.0, np.sign(np.linalg.det(U @ Vt))])

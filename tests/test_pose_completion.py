@@ -1,4 +1,4 @@
-"""P8: completion inference for the pose pairs and its use in the pose dataset."""
+"""Completion inference for the object–CAD pairs and its use in the pose dataset."""
 
 import dataclasses
 
@@ -7,11 +7,10 @@ import pytest
 import torch
 
 from caoa.data.pairs import cache_dir, load_pairs
-from caoa.data.pose_completion import canonical_points, complete, complete_pairs
+from caoa.data.pose_completion import complete, complete_pairs, to_canonical, world_points
 from caoa.data.pose_dataset import ObjectPoseDataset
 from caoa.geometry import yaw_matrix
 from caoa.paths import load_paths
-from tests import legacy_ref
 
 PATHS = load_paths()
 needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
@@ -19,38 +18,38 @@ needs_pairs = pytest.mark.skipif(not cache_dir(PATHS.cache).exists(), reason="ru
 
 
 @needs_cuda
-def test_completion_inference_matches_legacy():
-    """Same model, same inputs -> same completions. Instance sizes in [2048, 4096) make the
-    4096-point input deterministic (tiling) in both; 19 instances cover a partial last batch."""
+def test_completion_inference_outputs():
+    """One completion per input set (19 sets: a partial last batch), in the input's coordinates: the model works on the
+    centred, radius-normalised input and the output is mapped back."""
     from caoa.models.odgnet import UpTrans
 
     torch.manual_seed(0)
     model = UpTrans().cuda().eval()
     rng = np.random.default_rng(0)
-    sets = [rng.normal(size=(rng.integers(2048, 4096), 3)) * rng.uniform(0.2, 1.0, 3) for _ in range(19)]
-    ours = complete(model, sets, torch.device("cuda"))
-    with torch.no_grad():
-        theirs = legacy_ref.infer_completion_odg(model, sets)
-    assert len(ours) == len(theirs) == len(sets)
-    for a, b in zip(ours, theirs):
-        np.testing.assert_allclose(a, b, rtol=0, atol=1e-5)
+    sets = [rng.normal(size=(rng.integers(2048, 4096), 3)) * rng.uniform(0.2, 1.0, 3) + rng.uniform(-5, 5, 3) for _ in range(19)]
+    out = complete(model, sets, torch.device("cuda"))
+    assert len(out) == len(sets)
+    for x, c in zip(sets, out):
+        assert c.ndim == 2 and c.shape[1] == 3 and len(c) > len(x) and np.isfinite(c).all()
+        radius = np.linalg.norm(x - x.mean(0), axis=1).max()
+        assert np.linalg.norm(c.mean(0) - x.mean(0)) < radius  # mapped back next to the input
 
 
 @pytest.fixture(scope="module")
 def pairs():
-    return load_pairs(PATHS.cache, "val", class_rule="relpose_cache")[:60]
+    return load_pairs(PATHS.cache, "val")[:60]
 
 
 def _identity_completions(pairs):
     """'Completions' equal to the (tiled) canonical instance points."""
-    return {(p.scene_id, p.model_index): canonical_points(p).astype(np.float32) for p in pairs}
+    return {(p.scene_id, p.model_index): to_canonical(p, world_points(p)) for p in pairs}
 
 
 @needs_pairs
 @pytest.mark.parametrize("train", [False, True])
 @pytest.mark.parametrize("mode", ["only", "inst+comp"])
 def test_completion_frames_match_the_instance_frames(pairs, train, mode):
-    """Legacy maps completions from the canonical frame back to the world (test) or augments them
+    """The dataset maps completions from the canonical frame back to the world (test) or augments them
     in the canonical frame (train), exactly like the instance points. With completions equal to the
     instance points, targets and normalisation must not change ("inst+comp" only duplicates points,
     which leaves the bounding box and mean unchanged)."""
@@ -82,8 +81,8 @@ def _to_world(p, canonical):
 @needs_cuda
 @needs_pairs
 def test_world_frame_completion_uses_no_gt_pose(pairs):
-    """`world` (the fix): changing the GT box leaves the completion, mapped back to the world as the
-    pose dataset does, unchanged. `legacy` keeps the original GT-box-frame inference."""
+    """Changing the GT box leaves the completion, mapped back to the world as the pose dataset does, unchanged: no part
+    of the GT pose reaches the completion."""
     from caoa.models.odgnet import UpTrans
 
     torch.manual_seed(0)
@@ -98,9 +97,3 @@ def test_world_frame_completion_uses_no_gt_pose(pairs):
     b = complete_pairs(model, moved, device, "world")
     for p, q, ca, cb in zip(ps, moved, a, b):
         np.testing.assert_allclose(_to_world(p, ca), _to_world(q, cb), rtol=0, atol=1e-4)
-    np.random.seed(0)
-    legacy = complete_pairs(model, ps, device, "legacy")
-    np.random.seed(0)
-    ref = complete(model, [canonical_points(p) for p in ps], device)
-    for x, y in zip(legacy, ref):
-        np.testing.assert_array_equal(x, y)

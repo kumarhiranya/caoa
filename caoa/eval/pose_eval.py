@@ -1,26 +1,20 @@
 """Turn per-object pose predictions into every number we report.
 
-Predictions come out of the network in the test frame of `ObjectPoseDataset`
-(object scaled to unit size); `to_world` maps them back to metres.
+Predictions come out of the network in the test frame of `ObjectPoseDataset` (object scaled to unit size); `to_world`
+maps them back to metres. Only the evaluated S2C-C objects are scored; objects outside that set never count.
 
-Legacy evaluation (reproduced first, see docs/PLAN.md):
-* `legacy/<grouping>`: `eval_pose_s2c_v2`'s numbers (E2/E3) per class grouping;
-* `legacy_valid_classes`: the older `calc_pose_accuracy_s2c` (E5).
-Additions, always labelled as such:
-* `s2c_criteria/<convention>`: the official Scan2CAD per-object criteria (20 cm / 20 deg / 20 %, its error
-  formulas) on the evaluated S2C-C objects, each against its own S2C-C ground truth, in both submission
-  conventions. Objects outside the evaluated set are not counted (user, 2026-10-29: the official protocol's
-  "all GT objects, misses = failures" over `full_annotations.json` was retired from the reports);
-* `s2c_box`: the same criteria on the oriented box instead of the CAD (`caoa.eval.box_criteria`; CAD-independent,
-  added 2026-11-03 next to the unchanged `s2c_criteria`; with the GT CAD it differs from `s2c_criteria/minus_center`
-  only through the benchmark's translation reference point, see that module);
-* `proxy`: Scan2CAD formulas in the normalised frame.
+* `caoa/<grouping>`: the CAOA metric (`caoa.eval.caoa_metric`; the paper's metric) per class grouping
+  (`caoa.eval.groupings`; "table1" is the paper's Table 1 grouping);
+* `s2c_criteria/<convention>`: Scan2CAD's per-object criteria (20 cm / 20 deg / 20 %, the benchmark's own error
+  formulas) on the CAD placed by the predicted box, each object against its own S2C-C ground truth, in both submission
+  conventions (`scan2cad_benchmark.CONVENTIONS`);
+* `s2c_box`: the same criteria on the predicted box instead of the CAD (`caoa.eval.box_criteria`; CAD-independent).
 """
 
 import numpy as np
 
 from caoa.data.pairs import Pair
-from caoa.eval import box_criteria, groupings, legacy_report, metrics, scan2cad_benchmark
+from caoa.eval import box_criteria, caoa_metric, groupings, scan2cad_benchmark
 from caoa.geometry import nearest_rotation
 
 
@@ -46,21 +40,15 @@ def alignments_for(pairs: list[Pair], s2c_annotations: dict, centers, rotations,
     return out
 
 
-def evaluate_legacy_only(pairs, pred, target) -> dict:
-    """E2 with the legacy GT-instance grouping; what the legacy training loop validated with."""
-    return legacy_report.eval_pose_report(pred, target, [p.sym for p in pairs], groupings.class_labels(pairs, "scannet_class"))
+def evaluate_caoa_only(pairs, pred, target) -> dict:
+    """The CAOA metric with the pairs' own classes; what training validates with."""
+    return caoa_metric.eval_pose_report(pred, target, [p.sym for p in pairs], groupings.class_labels(pairs, "scannet_class"))
 
 
 def evaluate(pairs, pred, target, norm_scale, norm_offset, s2c_annotations) -> dict:
     """pred / target: (N, 15) in the normalised test frame; `s2c_annotations`: the S2C-C annotations, by scene."""
     syms = [p.sym for p in pairs]
-    results = {
-        "legacy": {g: legacy_report.eval_pose_report(pred, target, syms, groupings.class_labels(pairs, g)) for g in groupings.GROUPINGS},
-        "legacy_valid_classes": legacy_report.valid_classes_report(pred, target, syms, groupings.class_labels(pairs, "scannet_class")),
-        "proxy": metrics.summarize(
-            metrics.alignment_errors(*split_pose(pred), *split_pose(target), syms, metrics.MetricConfig()), [p.sem_name for p in pairs]
-        ),
-    }
+    results = {"caoa": {g: caoa_metric.eval_pose_report(pred, target, syms, groupings.class_labels(pairs, g)) for g in groupings.GROUPINGS}}
 
     centers, rotations, extents = to_world(pred, norm_scale, norm_offset)
     cats = np.array([scan2cad_benchmark.category_name(p.catid_cad) for p in pairs])

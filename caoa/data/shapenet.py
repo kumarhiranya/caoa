@@ -1,14 +1,8 @@
-"""ShapeNet CAD models: loading and the two legacy point samplers.
+"""ShapeNet CAD models: loading and the two surface samplers.
 
-Each legacy module sampled CAD surfaces its own way, and each port follows its
-own call path:
-
-* pose pipeline (`S2CCompletionPoseV2`): `trimesh.load_mesh(force="mesh")` ->
-  open3d `sample_points_uniformly(5000)`, i.e. area-weighted uniform sampling;
-  `sample_uniform` reproduces the distribution (not open3d's RNG stream).
-* completion loader (`ODGNet/datasets/S2CCompletionDataset.py`):
-  `trimesh.load(force="mesh", skip_materials=True)` -> `resample_mesh(density=2000)`
-  (Chris Choy's barycentric sampler; point count ~ surface area x density).
+* `sample_uniform`: a fixed number of area-weighted uniform surface samples (pose pipeline, 5,000 points);
+* `resample_mesh`: Chris Choy's barycentric sampler, point count ~ surface area x density (completion targets,
+  density 2,000).
 """
 
 from pathlib import Path
@@ -41,7 +35,7 @@ def sample_uniform(mesh: trimesh.Trimesh, n: int = POSE_CAD_POINTS, rng: np.rand
 
 
 def resample_mesh(mesh_cad, density: float = 1) -> np.ndarray:
-    """Verbatim port of the legacy `resample_mesh` (uses the global NumPy RNG, as the original)."""
+    """Barycentric sampler with about `density` points per unit area (uses the global NumPy RNG)."""
     faces = np.array(mesh_cad.faces if isinstance(mesh_cad, trimesh.Trimesh) else mesh_cad.triangles).astype(int)
     vertices = np.array(mesh_cad.vertices)
 
@@ -70,7 +64,7 @@ def resample_mesh(mesh_cad, density: float = 1) -> np.ndarray:
     return (1 - np.sqrt(r[:, 0:1])) * A + np.sqrt(r[:, 0:1]) * (1 - r[:, 1:]) * B + np.sqrt(r[:, 0:1]) * r[:, 1:] * C
 
 
-# CAD retrieval database (P11d): every ShapeNetV2 model, sampled once (`scripts/build_shapenet_points.py`).
+# CAD retrieval database: every ShapeNetV2 model, sampled once (`scripts/build_shapenet_points.py`).
 SHAPENET_POINTS_VERSION = "shapenet_points_v1"
 SHAPENET_POINTS = 2048
 
@@ -80,7 +74,7 @@ def shapenet_points_path(cache_root: Path) -> Path:
 
 
 def list_models(shapenet_root: Path) -> list[str]:
-    """Every model in the ShapeNetV2 copy as `catid_idcad`, sorted (55 synsets; the per-synset legacy .npy files are skipped)."""
+    """Every model in the ShapeNetV2 copy as `catid_idcad`, sorted (55 synsets; loose files are skipped)."""
     root = Path(shapenet_root)
     return sorted(
         f"{c.name}_{m.name}"

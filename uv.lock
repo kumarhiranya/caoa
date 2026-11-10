@@ -69,6 +69,7 @@ notebook = [
 ]
 train = [
     { name = "addict" },
+    { name = "scikit-learn" },
     { name = "spconv-cu126" },
     { name = "tensorboard" },
     { name = "torch" },
@@ -78,7 +79,6 @@ train = [
 dev = [
     { name = "numpy-quaternion" },
     { name = "pytest" },
-    { name = "scikit-learn" },
 ]
 
 [package.metadata]
@@ -91,6 +91,7 @@ requires-dist = [
     { name = "plotly", marker = "extra == 'notebook'", specifier = ">=5.24" },
     { name = "plyfile", specifier = ">=1.0" },
     { name = "pyyaml", specifier = ">=6.0" },
+    { name = "scikit-learn", marker = "extra == 'train'", specifier = ">=1.5" },
     { name = "scipy", specifier = ">=1.13" },
     { name = "spconv-cu126", marker = "extra == 'train'", specifier = "==2.3.8" },
     { name = "tensorboard", marker = "extra == 'train'", specifier = ">=2.18" },
@@ -104,7 +105,6 @@ provides-extras = ["train", "notebook"]
 dev = [
     { name = "numpy-quaternion", specifier = ">=2024.0" },
     { name = "pytest", specifier = ">=8.0" },
-    { name = "scikit-learn", specifier = ">=1.5" },
 ]
 
 [[package]]

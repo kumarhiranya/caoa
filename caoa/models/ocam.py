@@ -1,11 +1,10 @@
-"""OCAM pose network: the legacy `MinkowskiFCNNP_v3` (object points only), ported to spconv.
+"""OCAM: the object–CAD alignment network, on spconv.
 
-Layer layout, widths, activations and initialisation follow the legacy model
-(`utils/model_utils.py`); the ME semantics it depends on are in `sparse.py`.
-Outputs translation (3), rotation as a tanh-squashed 3x3 matrix (9), scale (3).
-With `ext_emb_size > 0` it is the legacy `MinkowskiFCNNP_v3_emb` ("mnkpv3_emb", P10a): an external
-embedding (the SEM symmetry embedding of the CAD) is concatenated to the pooled feature before the heads.
-`OCAMSiamese` (P10b) adds a CAD trunk, shared (paper) or separate (legacy RelPose).
+`OCAMObjectOnly`: the object's (completed or raw) points -> multi-scale sparse convolutions -> global max + avg pool
+-> heads for translation (3), rotation as a tanh-squashed 3x3 matrix (9) and scale (3) of the object's box. With
+`ext_emb_size > 0` an external embedding (the SEM symmetry embedding of the CAD) is concatenated to the pooled feature
+before the heads. `OCAMSiamese` adds a CAD trunk, shared with the object's (the paper's Siamese network) or separate
+(our final model). The Minkowski Engine semantics the layers depend on are in `sparse.py`.
 """
 
 import math
@@ -54,7 +53,7 @@ def check_ext_emb(ext_emb, ext_emb_size):
 
 
 class OCAMEncoder(nn.Module):
-    """The legacy `mnkpv3` trunk: points -> multi-scale sparse convs -> global max+avg pool (2 x embedding)."""
+    """Trunk: points -> multi-scale sparse convs -> global max+avg pool (2 x embedding)."""
 
     def __init__(self, in_channels=3, embedding=1024, channels=(32, 48, 64, 96, 128)):
         super().__init__()
@@ -89,7 +88,7 @@ class OCAMEncoder(nn.Module):
 
 
 class OCAMObjectOnly(OCAMEncoder):
-    """Legacy "mnkpv3" (and "mnkpv3_emb"): completed (or raw) object points [+ external embedding] -> 9-DoF box pose."""
+    """Completed (or raw) object points [+ external embedding] -> 9-DoF box pose."""
 
     def __init__(self, in_channels=3, embedding=1024, channels=(32, 48, 64, 96, 128), rotation_dims=9, ext_emb_size=0):
         super().__init__(in_channels, embedding, channels)
@@ -110,8 +109,8 @@ class OCAMObjectOnly(OCAMEncoder):
         return torch.cat([self.translation(pooled), self.rotation(pooled), self.scale(pooled)], dim=1)
 
 
-def relpose_head(in_ch: int, hidden: tuple[int, ...], out_ch: int, tanh: bool = False) -> nn.Sequential:
-    """Legacy `MinkowskiFCNNRelPose_v1` branch: MLP blocks with dropout (0.5) between them, then a linear layer."""
+def siamese_head(in_ch: int, hidden: tuple[int, ...], out_ch: int, tanh: bool = False) -> nn.Sequential:
+    """Siamese head branch: MLP blocks with dropout (0.5) between them, then a linear layer."""
     layers, prev = [], in_ch
     for i, h in enumerate(hidden):
         if i:
@@ -125,12 +124,10 @@ def relpose_head(in_ch: int, hidden: tuple[int, ...], out_ch: int, tanh: bool = 
 
 
 class OCAMSiamese(nn.Module):
-    """P10b: object points + CAD points -> 9-DoF box pose of the object.
+    """Object points + CAD points -> 9-DoF box pose of the object.
 
-    `shared=False` is the legacy `MinkowskiFCNNRelPose_v1` layout (separate object and CAD trunks), with its bug fixed:
-    legacy's CAD trunk calls the object trunk's `conv4` (its own `conv4_cad` is never used). `shared=True` is the
-    paper's Siamese network (one trunk for both). The heads are legacy RelPose's in both cases (input: object and CAD
-    features, 4 x embedding, + an optional external embedding such as SEM's).
+    `shared=True`: the paper's Siamese network (one trunk for object and CAD); `shared=False`: separate object and CAD
+    trunks. The heads take the object and CAD features (4 x embedding) + an optional external embedding (SEM's).
     """
 
     def __init__(self, in_channels=3, embedding=1024, channels=(32, 48, 64, 96, 128), rotation_dims=9, ext_emb_size=0,
@@ -141,9 +138,9 @@ class OCAMSiamese(nn.Module):
         self.cad = self.obj if shared else OCAMEncoder(in_channels, embedding, channels)
         self.ext_emb_size = ext_emb_size
         feat = 4 * embedding + ext_emb_size
-        self.translation = relpose_head(feat, (1024, 512, 64), 3)
-        self.rotation = relpose_head(feat, (1024, 512, 256, 128), rotation_dims, tanh=True)
-        self.scale = relpose_head(feat, (1024, 512, 64), 3)
+        self.translation = siamese_head(feat, (1024, 512, 64), 3)
+        self.rotation = siamese_head(feat, (1024, 512, 256, 128), rotation_dims, tanh=True)
+        self.scale = siamese_head(feat, (1024, 512, 64), 3)
         init_weights(self)
 
     def forward(self, coords, feats, batch, batch_size, cad_coords, cad_feats, cad_batch, ext_emb=None) -> torch.Tensor:

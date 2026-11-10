@@ -1,0 +1,30 @@
+# Ablation: + SEM + Siamese CAD branch with one trunk shared by object and CAD (the paper's design).
+name: ocam_siamese_shared
+seed: 777
+
+model:
+  embedding: 1024
+  siamese: {shared: true}
+  sym_embedding: {name: sem, frame: cad_bbox, checkpoint: outputs/sem/model_recalibrated.pth}  # scripts/build_sem_embeddings.py
+
+data:
+  completion: {name: capcm_concat, mode: only, frame: world, checkpoint: outputs/capcm_concat}  # scripts/build_pose_completions.py
+  num_points: 8192
+  voxel_size: 0.01
+  rot_range_deg: [-180, 180]
+  scale_range: [0.4, 1.4]
+  scale_aspect_range: [0.0, 0.0]
+  trans_range: [-0.5, 0.5]
+
+train:
+  batch_size: 64
+  max_steps: 25000
+  lr: 1.0e-4
+  weight_decay: 1.0e-3  # AdamW
+  min_lr_ratio: 0.01  # cosine annealing down to lr / 100 (T_max = max_steps)
+  loss_weights: {t: 2, r: 1, s: 2}  # L1, summed over components, averaged over the batch
+  shuffle: false
+  num_workers: 8
+  stat_freq: 150
+  save_freq: 1000
+  val_freq: 1000

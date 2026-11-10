@@ -1,18 +1,14 @@
-"""SN-Indoor for CAPCM: port of `ODGNet/datasets/SNAugDataset.py` (current file, complete).
+"""SN-Indoor samples for the CAPCM: a port of ODGNet's `SNAugDataset`.
 
-Per item, as legacy:
-* GT: the CAD mesh (`trimesh.load(force="mesh", skip_materials=True)`) sampled afresh
-  with `mesh.sample(10000)`;
-* input: the pre-generated partial scan (`ShapeNetV2-augmented/<cat>/<id>/<k>.ply`),
-  cropped by a random non-linear surface (the larger side is kept; "hard" = no shift)
-  and jittered with Gaussian noise (sigma 0.005);
-* both sampled to `num_points`, rotated by the same random yaw in [-180, 180] degrees
-  (train *and* val, as `rotate_z` is not phase-gated in legacy), then `pc_norm` on the
-  input; returns the legacy 6-tuple `(catid, id_cad, partial, gt, sem_emb, idx)`.
+Per item:
+* GT: the CAD mesh (`trimesh.load(force="mesh", skip_materials=True)`) sampled afresh with `mesh.sample(10000)`;
+* input: the pre-generated partial scan (`ShapeNetV2-augmented/<cat>/<id>/<k>.ply`), cropped by a random non-linear
+  surface (the larger side is kept; "hard" = no shift) and jittered with Gaussian noise (sigma 0.005);
+* both sampled to `num_points`, rotated by the same random yaw in [-180, 180] degrees (train and val), then `pc_norm`
+  on the input; returns the 6-tuple `(catid, id_cad, partial, gt, sem_emb, idx)`.
 
-The file list is `aug_train_test_splits.pkl[phase]` (7 categories, paths relative to the
-legacy `data/S2CCompletion/`), drawn with `random.choices(k=len // data_downscale_factor)`
-(with replacement, as legacy; kept by user decision 2026-10-20).
+The file list is `aug_train_test_splits.pkl[phase]` (7 categories; its paths start with `data/S2CCompletion/ShapeNetV2`
+and are mapped onto `shapenet_root`), drawn with `random.choices(k=len // data_downscale_factor)` (with replacement).
 """
 
 import math
@@ -27,28 +23,28 @@ from torch.utils.data import Dataset
 
 from caoa.data.completion_dataset import pc_norm
 from caoa.data.labels import synset_to_eval_class
-from caoa.data.legacy_sampling import sample_points
+from caoa.data.sampling import sample_points
 from caoa.geometry import yaw_matrix
 
-_LEGACY_PREFIX = "data/S2CCompletion/ShapeNetV2"
+_SPLIT_PREFIX = "data/S2CCompletion/ShapeNetV2"
 SHIFT_RANGE = {"easy": 0.2, "medium": 0.1}  # anything else ("hard") -> 0
 
 
 def load_split(shapenet_root: Path, phase: str) -> list[tuple[Path, Path]]:
-    """`aug_train_test_splits.pkl` pairs with the legacy relative paths mapped onto `shapenet_root`."""
+    """`aug_train_test_splits.pkl` pairs with their relative paths mapped onto `shapenet_root`."""
     with open(Path(shapenet_root) / "aug_train_test_splits.pkl", "rb") as f:
         pairs = pickle.load(f)["val" if phase in ("val", "test") else "train"]
     root = str(shapenet_root)
 
     def remap(p: str) -> Path:
-        assert p.startswith(_LEGACY_PREFIX), p
-        return Path(root + p[len(_LEGACY_PREFIX):])
+        assert p.startswith(_SPLIT_PREFIX), p
+        return Path(root + p[len(_SPLIT_PREFIX):])
 
     return [(remap(mesh), remap(pcd)) for mesh, pcd in pairs]
 
 
 def crop_random_nonlinear(points: np.ndarray, difficulty: str = "easy") -> np.ndarray:
-    """Legacy crop (same `random` calls in the same order); vectorised."""
+    """ODGNet's random non-linear crop (same `random` calls in the same order), vectorised."""
     a = random.random() * 7
     b = random.random() * 3
     m = random.random() / 2

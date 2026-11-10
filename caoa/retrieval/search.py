@@ -1,8 +1,8 @@
-"""CAD retrieval: embed the database and the queries, search, and score (P11d).
+"""CAD retrieval: embed the database and the queries, search, and score.
 
 Search modes (`category`):
-* "same" (default, user 2026-11-03): only CADs of the query's ShapeNet synset; for now the GT CAD's synset (the
-  GT-instance setting), a predicted one in P11;
+* "same" (default): only CADs of the query's ShapeNet synset (the GT CAD's synset on GT instances; the full pipeline
+  restricts the search by the predicted class instead, `pipeline.class_allowed`);
 * "all": every database CAD; the retrieval then also decides the category.
 
 Metrics, per query, against its GT CAD (always in the database):

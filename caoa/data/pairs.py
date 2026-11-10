@@ -4,9 +4,8 @@ Pairs are built per scene from the raw ScanNet files and cached as one pickle
 per scene. Points are stored in the Scan2CAD world frame (y up, metres); any
 normalisation for a particular model or metric happens in the dataset classes.
 
-The cache keeps every matched pair with the instance's own ScanNet class. Which
-pairs a run uses, and the class name each one gets, is decided at load time by
-a class rule (`CLASS_RULES`), so the legacy variants share one cache.
+The cache keeps every matched pair with the instance's own ScanNet class; the class
+name a pair is used with (`sem_name`) is set at load time (`class_name`).
 """
 
 import dataclasses
@@ -23,16 +22,11 @@ from caoa.geometry import transform_points
 
 CACHE_VERSION = "pairs_v2"
 
-# Class rules (legacy `load_s2c_data_pose_v2`, `custom_datasets_pose.py`):
-#   "v2":            S2CCompletionPoseV2. An unannotated instance takes its CAD's eval
-#                    class, or is dropped if the CAD is not one of the 8 eval classes.
-#   "relpose_cache": S2CCompletionRelPose, which wrote the cache file the reported runs
-#                    read (same file name as V2). Same as "v2" for unannotated *and*
-#                    otherfurniture instances. Gives the 1,864-sample legacy test set.
-#   "all_matched":   keep every matched pair; unannotated instances take their CAD's
-#                    eval class when there is one. Not legacy; a candidate fix.
-CLASS_RULES = ("v2", "relpose_cache", "all_matched")
-_RELABELLED = {"v2": ("unannotated",), "relpose_cache": ("unannotated", "otherfurniture"), "all_matched": ("unannotated",)}
+# Instances of these classes take their CAD's eval class, and are dropped if the CAD is not one of the 8 eval classes.
+# RELABELLED gives the 6,663 train / 1,864 val pairs of the CAPCM, OCAM, retrieval and every table; the SEM's training
+# set keeps "otherfurniture" instances (SEM_RELABELLED).
+RELABELLED = ("unannotated", "otherfurniture")
+SEM_RELABELLED = ("unannotated",)
 
 
 @dataclass
@@ -52,7 +46,7 @@ class Pair:
     box_extents: np.ndarray  # (3,) full side lengths
     cad_matrix: np.ndarray  # (4, 4) CAD trs, for the official Scan2CAD target
     keypoints_scan: np.ndarray = field(repr=False)  # (K, 3) world frame
-    sem_name: str | None = None  # class name under the class rule; set by `apply_class_rule`
+    sem_name: str | None = None  # class name the pair is used with; set by `load_pairs`
 
 
 @dataclass
@@ -64,20 +58,17 @@ class SceneStats:
     missing_instance: int = 0  # annotation points at an instance id the scene doesn't have
 
 
-def class_rule_name(scannet_class: str, catid_cad: str, rule: str) -> str | None:
-    """Class name of a pair under `rule`, or None if the rule drops it."""
-    if rule not in CLASS_RULES:
-        raise ValueError(f"unknown class rule {rule!r}, expected one of {CLASS_RULES}")
-    if scannet_class in _RELABELLED[rule]:
-        name = synset_to_eval_class().get(catid_cad)
-        return name if name is not None or rule != "all_matched" else scannet_class
+def class_name(scannet_class: str, catid_cad: str, relabelled=RELABELLED) -> str | None:
+    """Class name of a pair, or None if the pair is dropped."""
+    if scannet_class in relabelled:
+        return synset_to_eval_class().get(catid_cad)
     return scannet_class
 
 
-def apply_class_rule(pairs: list[Pair], rule: str) -> list[Pair]:
+def apply_class_names(pairs: list[Pair], relabelled=RELABELLED) -> list[Pair]:
     out = []
     for p in pairs:
-        name = class_rule_name(p.scannet_class, p.catid_cad, rule)
+        name = class_name(p.scannet_class, p.catid_cad, relabelled)
         if name is not None:
             out.append(dataclasses.replace(p, sem_name=name))
     return out
@@ -137,10 +128,10 @@ def save_scene_pairs(cache_root: Path, scene_id: str, pairs: list[Pair], stats: 
     tmp.rename(out)
 
 
-def load_pairs(cache_root: Path, split: str | None = None, *, class_rule: str) -> list[Pair]:
-    """Cached pairs of `split` (all splits if None), filtered and named by `class_rule`."""
+def load_pairs(cache_root: Path, split: str | None = None, relabelled=RELABELLED) -> list[Pair]:
+    """Cached pairs of `split` (all splits if None), filtered and named (`class_name`)."""
     pairs = []
     for path in sorted(cache_dir(cache_root).glob("scene*.pkl")):
         with open(path, "rb") as f:
             pairs.extend(p for p in pickle.load(f)["pairs"] if split is None or p.split == split)
-    return apply_class_rule(pairs, class_rule)
+    return apply_class_names(pairs, relabelled)

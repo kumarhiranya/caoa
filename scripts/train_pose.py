@@ -1,17 +1,14 @@
-"""Train and evaluate the object-only OCAM pose network.
+"""Train and evaluate an OCAM (object–CAD alignment network).
 
-    uv run python scripts/train_pose.py configs/pose/legacy_nocomp.yaml [--max-steps N] [--eval-only CKPT]
+    uv run python scripts/train_pose.py configs/ocam/final.yaml [--seed N] [--max-steps N] [--eval-only CKPT]
 
-The training loop reproduces legacy `train_pose9dof` (utils/training_utils.py):
-checks run on the step counter before it is incremented (stats every
-`stat_freq`, checkpoint every `save_freq`, validation every `val_freq`), the
-loop only stops at the end of the epoch in which `max_steps` is reached, and the
-cosine schedule keeps stepping past `max_steps`. The final model is then
-evaluated as legacy eval mode did (`eval_pose_s2c_v2` with per-class results and
-timing), plus the labelled official/matched additions.
+Training loop: checks run on the step counter before it is incremented (stats every `stat_freq`, checkpoint every
+`save_freq`, validation every `val_freq` with the CAOA metric), the loop stops at the end of the epoch in which
+`max_steps` is reached, and the cosine schedule keeps stepping past `max_steps`. The final model is then evaluated on
+the 1,864 val objects (`caoa.eval.pose_eval`: CAOA metric per grouping, Scan2CAD criteria, box criteria) with timing.
 
-Writes to outputs/<name>/: config, TensorBoard logs, train_log.json (legacy
-keys), model.pth / model_final.pth, results.json and per-class CSVs.
+`--seed N` (other than the config's) trains `<name>_seed<N>`. Writes to outputs/<name>/: config, TensorBoard logs,
+train_log.json, model.pth (last periodic checkpoint) / model_final.pth, results.json and per-class CSVs.
 """
 
 import argparse
@@ -49,9 +46,9 @@ def make_loader(pairs, train: bool, cfg: dict, data_cfg: PoseDataConfig, shuffle
 
 
 def model_inputs(batch, device):
-    ext = batch["sym_emb"].to(device) if "sym_emb" in batch else None  # legacy "mnkpv3_emb" (P10a)
+    ext = batch["sym_emb"].to(device) if "sym_emb" in batch else None  # SEM embedding
     obj = (batch["coords"].to(device), batch["feats"].to(device), batch["batch"].to(device), batch["batch_size"])
-    if "cad_coords" in batch:  # Siamese (P10b)
+    if "cad_coords" in batch:  # Siamese
         return *obj, batch["cad_coords"].to(device), batch["cad_feats"].to(device), batch["cad_batch"].to(device), ext
     return *obj, ext
 
@@ -62,18 +59,18 @@ def forward(model, batch, device):
 
 @torch.no_grad()
 def predict(model, loader, device, timed=False):
-    """Predictions for a whole loader. With `timed`, also inference ms/sample:
-    "legacy" times the forward call without synchronising (as legacy did), "synced" waits for the GPU."""
+    """Predictions for a whole loader. With `timed`, also inference ms/sample: "unsynced" times the forward call
+    without synchronising, "synced" waits for the GPU."""
     model.eval()
     out = {"pred": [], "target": [], "norm_scale": [], "norm_offset": [], "index": []}
-    legacy_ms, synced_ms = [], []
+    unsynced_ms, synced_ms = [], []
     for batch in loader:
         inputs = model_inputs(batch, device)
         if timed:
             torch.cuda.synchronize()
         start = time.time()
         pred = model(*inputs)
-        legacy_ms.append((time.time() - start) * 1000 / batch["batch_size"])
+        unsynced_ms.append((time.time() - start) * 1000 / batch["batch_size"])
         if timed:
             torch.cuda.synchronize()
             synced_ms.append((time.time() - start) * 1000 / batch["batch_size"])
@@ -83,7 +80,7 @@ def predict(model, loader, device, timed=False):
     model.train()
     result = {k: np.concatenate(v) for k, v in out.items()}
     if timed:
-        result["timing_ms_per_sample"] = {"legacy": float(np.mean(legacy_ms)), "synced": float(np.mean(synced_ms))}
+        result["timing_ms_per_sample"] = {"unsynced": float(np.mean(unsynced_ms)), "synced": float(np.mean(synced_ms))}
     return result
 
 
@@ -92,10 +89,13 @@ def main():
     parser.add_argument("config")
     parser.add_argument("--max-steps", type=int, default=None, help="override, e.g. for a smoke test")
     parser.add_argument("--eval-only", default=None, help="checkpoint to evaluate instead of training")
+    parser.add_argument("--seed", type=int, default=None, help="another seed: trains <name>_seed<N>")
     args = parser.parse_args()
 
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
+    if args.seed is not None and args.seed != cfg["seed"]:
+        cfg["name"], cfg["seed"] = f"{cfg['name']}_seed{args.seed}", args.seed
     if args.max_steps is not None:
         cfg["train"]["max_steps"] = args.max_steps
     tcfg = cfg["train"]
@@ -107,29 +107,28 @@ def main():
     np.random.seed(cfg["seed"])
     torch.manual_seed(cfg["seed"])
     device = torch.device("cuda")
-    torch.backends.cudnn.benchmark = True  # as legacy (ODGNet main.py:18, train_pose.py)
+    torch.backends.cudnn.benchmark = True
 
     paths = load_paths()
     data = dict(cfg["data"])
-    class_rule = data.pop("class_rule")
-    completion = data.pop("completion", None)  # {name: <pose completion cache>, mode: only | inst+comp, frame: legacy | world}
-    completions = load_pose_completions(paths.cache, completion["name"], completion.get("frame", "legacy")) if completion else None
+    completion = data.pop("completion", None)  # {name: <pose completion cache>, mode: only | inst+comp, frame: world, checkpoint}
+    completions = load_pose_completions(paths.cache, completion["name"], completion.get("frame", "world")) if completion else None
     completion_mode = completion["mode"] if completion else None
-    # P10b: Siamese OCAM, CAD points in the CAD's bounding-box frame (scripts/build_cad_points.py)
-    siamese = cfg["model"].get("siamese")  # {shared: true (paper) | false (legacy RelPose layout, conv4 fixed)}
+    # Siamese OCAM: CAD points in the CAD's bounding-box frame (scripts/build_cad_points.py)
+    siamese = cfg["model"].get("siamese")  # {shared: true (one trunk, the paper's) | false (separate trunks)}
     cad_points = load_cad_points(paths.cache) if siamese else None
-    # P10a: SEM symmetry embedding of the GT CAD; sym_embedding: {name: <legacy symmetry_model_name>, frame: legacy_export | cad_bbox}
+    # SEM symmetry embedding of the CAD; sym_embedding: {name: <embeddings cache>, frame: cad_bbox, checkpoint}
     sym = cfg["model"].get("sym_embedding")
-    sym_embeddings = load_sym_embeddings(sem_embedding_path(paths, sym["name"], sym.get("frame", "legacy_export"))) if sym else None
-    train_pairs = load_pairs(paths.cache, "train", class_rule=class_rule)
-    val_pairs = load_pairs(paths.cache, "val", class_rule=class_rule)
+    sym_embeddings = load_sym_embeddings(sem_embedding_path(paths, sym["name"], sym.get("frame", "cad_bbox"))) if sym else None
+    train_pairs = load_pairs(paths.cache, "train")
+    val_pairs = load_pairs(paths.cache, "val")
     data_cfg = PoseDataConfig(**{k: tuple(v) if isinstance(v, list) else v for k, v in data.items()})
     train_loader = make_loader(train_pairs, True, cfg, data_cfg, shuffle=tcfg["shuffle"], completions=completions, completion_mode=completion_mode,
                                sym_embeddings=sym_embeddings, cad_points=cad_points)
     val_loader = make_loader(val_pairs, False, cfg, data_cfg, shuffle=False, completions=completions, completion_mode=completion_mode,
                              sym_embeddings=sym_embeddings, cad_points=cad_points)
-    print(f"class rule {class_rule}: train pairs {len(train_pairs)}, val pairs {len(val_pairs)}"
-          + (f"; completion {completion['name']} ({completion_mode}, frame {completion.get('frame', 'legacy')})" if completion else ""))
+    print(f"train pairs {len(train_pairs)}, val pairs {len(val_pairs)}"
+          + (f"; completion {completion['name']} ({completion_mode})" if completion else ""))
 
     ext_emb_size = len(next(iter(sym_embeddings.values()))) if sym_embeddings else 0
     if siamese:
@@ -143,7 +142,6 @@ def main():
 
     final = predict(model, val_loader, device, timed=True)
     results = evaluate(final, val_pairs, paths)
-    results["class_rule"] = class_rule
     results["timing_ms_per_sample"] = final["timing_ms_per_sample"]
     (out_dir / "results.json").write_text(json.dumps(results, indent=1))
     write_per_class_csvs(results, out_dir)
@@ -156,9 +154,9 @@ def train(model, train_loader, val_loader, val_pairs, tcfg, out_dir, device):
     w = tcfg["loss_weights"]
     l1 = torch.nn.L1Loss(reduction="sum")
     writer = SummaryWriter(out_dir)
-    chamfer_weight = tcfg.get("chamfer_weight", 0.0)  # P10c
+    chamfer_weight = tcfg.get("chamfer_weight", 0.0)  # the paper's Chamfer term
     log = {k: [] for k in ("loss", "loss_pose", "loss_t", "loss_q", "loss_s", "loss_chamfer", "iter_loss", "epochs",
-                           "inst_pose_mae", "iter_acc", "s2c_t", "s2c_q", "s2c_s", "s2c_total")}
+                           "val_pose_mae", "iter_acc", "val_caoa_t", "val_caoa_q", "val_caoa_s", "val_caoa_total")}
 
     i, epoch, start = 0, 0, time.time()
     model.train()
@@ -197,20 +195,20 @@ def train(model, train_loader, val_loader, val_pairs, tcfg, out_dir, device):
 
             if i % tcfg["val_freq"] == 0 and i > 0:
                 val = predict(model, val_loader, device)
-                rep = pose_eval.evaluate_legacy_only(val_pairs, val["pred"], val["target"])
+                rep = pose_eval.evaluate_caoa_only(val_pairs, val["pred"], val["target"])
                 avg, mae = rep["avg"], rep["mae"]
-                log["inst_pose_mae"].append(mae["pose"])
+                log["val_pose_mae"].append(mae["pose"])
                 log["iter_acc"].append(i)
                 for k in ("t", "q", "s"):
-                    log[f"s2c_{k}"].append(avg[f"{k}_acc"])
-                log["s2c_total"].append(avg["total_acc"])
+                    log[f"val_caoa_{k}"].append(avg[f"{k}_acc"])
+                log["val_caoa_total"].append(avg["total_acc"])
                 for k in ("pose", "t", "q", "s"):
                     writer.add_scalar(f"val_mae/{k}", mae[k], i)
                 for k in ("t_acc", "q_acc", "s_acc", "total_acc", "rotation_error_deg"):
                     writer.add_scalar(f"test_acc/{k}", avg[k], i)
                 print(
                     f"Epoch: {epoch}, Validation Pose MAE: Inst:{mae['pose']:.4f} t {mae['t']:.4f} q {mae['q']:.4f} s {mae['s']:.4f}, "
-                    f"S2C Avg: total {avg['total_acc']:.4f} t {avg['t_acc']:.4f} q {avg['q_acc']:.4f} s {avg['s_acc']:.4f}",
+                    f"CAOA metric: total {avg['total_acc']:.4f} t {avg['t_acc']:.4f} q {avg['q_acc']:.4f} s {avg['s_acc']:.4f}",
                     flush=True,
                 )
                 (out_dir / "train_log.json").write_text(json.dumps(log))
@@ -233,11 +231,11 @@ def evaluate(final, val_pairs, paths):
 
 
 def write_per_class_csvs(results, out_dir):
-    """One table per grouping: rows = classes + macro/micro averages; columns as legacy eval mode printed."""
+    """CAOA metric, one table per grouping: rows = classes + macro/micro averages."""
     for grouping in groupings.GROUPINGS:
-        pc = results["legacy"][grouping]["per_class"]
+        pc = results["caoa"][grouping]["per_class"]
         rows = [c for c in pc["total"] if c not in ("macro_avg", "micro_avg")] + ["macro_avg", "micro_avg"]
-        with open(out_dir / f"legacy_per_class_{grouping}.csv", "w", newline="") as f:
+        with open(out_dir / f"caoa_per_class_{grouping}.csv", "w", newline="") as f:
             w = csv.writer(f)
             w.writerow(["", "translation", "rotation", "scale", "total", "support"])
             for r in rows:
@@ -245,17 +243,15 @@ def write_per_class_csvs(results, out_dir):
 
 
 def print_summary(results):
-    print(f"\nval pairs {results['n_val_pairs']} (class rule {results['class_rule']})")
-    for g in groupings.GROUPINGS:
-        r = results["legacy"][g]
-        print(f"legacy [{g:<17}] micro {r['per_class']['total']['micro_avg']:.4f}  macro {r['per_class']['total']['macro_avg']:.4f}")
-    a = results["legacy"]["scannet_class"]
-    print(f"legacy MAE {a['mae']}  mean rot err {a['avg']['rotation_error_deg']:.2f} deg  mean scale err {a['avg']['mean_scale_error_pct']:.2f}%")
-    e5 = results["legacy_valid_classes"]
-    print(f"legacy calc_pose_accuracy_s2c (VALID_CLASSES): avg {e5['avg']['total_acc']:.4f}  cls_avg {e5['cls_avg']['total_acc']:.4f}")
-    for key in ("s2c_criteria/minus_center", "s2c_criteria/plain", "s2c_box"):
+    print(f"\nval pairs {results['n_val_pairs']}")
+    for key in ("s2c_box", "s2c_criteria/minus_center", "s2c_criteria/plain"):
         r = results[key]
         print(f"{key:<24} instance {r['instance_mean']:.4f}  class {r['class_mean']:.4f}")
+    for g in groupings.GROUPINGS:
+        r = results["caoa"][g]
+        print(f"CAOA [{g:<17}] micro {r['per_class']['total']['micro_avg']:.4f}  macro {r['per_class']['total']['macro_avg']:.4f}")
+    a = results["caoa"]["scannet_class"]
+    print(f"CAOA MAE {a['mae']}  mean rot err {a['avg']['rotation_error_deg']:.2f} deg  mean scale err {a['avg']['mean_scale_error_pct']:.2f}%")
     print(f"inference ms/sample: {results['timing_ms_per_sample']}")
 
 

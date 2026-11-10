@@ -1,18 +1,14 @@
-# Data locations on the UAlbany DGX (dgx-head01), as transferred on 2026-10-24 (caoa_data moved next to the
-# lab datasets on 2026-10-24). These are the lab share's host paths. Use with:
-#   cp configs/paths.dgx.yaml configs/paths.local.yaml      (or: export CAOA_PATHS=configs/paths.dgx.yaml)
-# Inside the pyxis container of the Slurm jobs the lab share is mounted only at /workspace/lab, so there use:
+# Data locations on the UAlbany DGX (lab share host paths). Inside the Slurm jobs' pyxis container the share is
+# mounted at /workspace/lab:
 #   sed "s|/network/rit/lab/kumar_lab|/workspace/lab|" configs/paths.dgx.yaml > configs/paths.local.yaml
-# caoa_data/ is the transfer bundle (scripts/make_transfer_bundle.py) without ScanNet and ShapeNet. Those two
-# point at the lab's existing dataset copies, which match the bundle's files byte for byte (MD5 of all 9,092).
-# The ShapeNet copy is the full ShapeNetCore v2, with the SN-Indoor partials next to it (ShapeNetV2-augmented).
 
 scannet_scans: /network/rit/lab/kumar_lab/research_data/3D Datasets/ScanNet_v2/dataset/scans
 shapenet: /network/rit/lab/kumar_lab/research_data/3D Datasets/ShapeNetV2
-s2c_annotations: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/legacy/scan2cad_annotator/scan2cad_v2_completion_annotations.json
-scan2cad_full_annotations: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/legacy/Scan2CAD/dataset/full_annotations.json
-scan2cad_cad_appearances: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/legacy/Scan2CAD/dataset/cad_appearances.json
-legacy_repo: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/legacy
-semantic_embeddings: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/legacy/data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy
-legacy_results: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/legacy/results
+s2c_annotations: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/data/s2cc/scan2cad_v2_completion_annotations.json
+s2c_cad_splits: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/data/s2cc/s2c_cad_splits.pkl
+scan2cad_full_annotations: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/data/scan2cad/full_annotations.json
+scan2cad_cad_appearances: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/data/scan2cad/cad_appearances.json
+semantic_embeddings: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/data/s2cc/semantic_embeddings.npy
+softgroup_preds: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/data/instances/softgroup/val
+sphericalmask_preds: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/data/instances/sphericalmask/val
 cache: /network/rit/lab/kumar_lab/research_data/3D Datasets/caoa_data/caoa_cache

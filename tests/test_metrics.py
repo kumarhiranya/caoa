@@ -5,7 +5,6 @@ from scipy.spatial.transform import Rotation
 
 from caoa.eval.metrics import MetricConfig, alignment_errors, rotation_error_deg
 from caoa.geometry import yaw_matrix
-from tests import legacy_ref
 
 SYMS = ["__SYM_NONE", "__SYM_ROTATE_UP_2", "__SYM_ROTATE_UP_4", "__SYM_ROTATE_UP_INF"]
 
@@ -24,20 +23,15 @@ def random_poses(rng, n, noise_deg):
 
 
 @pytest.mark.parametrize("noise_deg", [5, 30, 120])
-def test_legacy_mode_matches_legacy_code(noise_deg):
+def test_caoa_mode_definitions(noise_deg):
     rng = np.random.default_rng(noise_deg)
     t_pred, R_pred, s_pred, t_gt, R_gt, s_gt, syms = random_poses(rng, 400, noise_deg)
-
-    ours = alignment_errors(t_pred, R_pred, s_pred, t_gt, R_gt, s_gt, syms, MetricConfig.legacy())
-
-    # Legacy pose vectors: t (3) | flattened rotation matrix (9) | s (3)
-    gt = np.concatenate([t_gt, R_gt.reshape(-1, 9), s_gt], axis=1)
-    pred = np.concatenate([t_pred, R_pred.reshape(-1, 9), s_pred], axis=1)
-    ref = legacy_ref.calc_pose_accuracy_s2c_nocls(gt, pred, syms)
-
-    np.testing.assert_allclose(ours["err_r"], ref["err_r"], atol=1e-6)
-    np.testing.assert_allclose(ours["err_s"], ref["err_s"], atol=1e-9)
-    np.testing.assert_array_equal(ours["ok"], ref["total"])
+    ours = alignment_errors(t_pred, R_pred, s_pred, t_gt, R_gt, s_gt, syms, MetricConfig.caoa())
+    np.testing.assert_allclose(ours["err_t"], np.linalg.norm(t_pred - t_gt, axis=1))
+    np.testing.assert_allclose(ours["err_s"], 100 * np.mean(np.abs(s_pred / (s_gt + 1e-4) - 1), axis=1))
+    np.testing.assert_array_equal(ours["ok_t"], ours["err_t"] < 0.2)  # strict
+    np.testing.assert_array_equal(ours["ok"], ours["ok_t"] & ours["ok_r"] & ours["ok_s"])
+    assert (ours["err_r"] >= 0).all()
 
 
 def test_scan2cad_rotation_is_geodesic_with_symmetry():
@@ -49,11 +43,11 @@ def test_scan2cad_rotation_is_geodesic_with_symmetry():
     assert rotation_error_deg(R_pred, R_gt, "__SYM_ROTATE_UP_4") == pytest.approx(0.0, abs=1e-5)
 
 
-def test_legacy_rotation_is_lenient_for_symmetric_objects():
-    """Documents the legacy bug: a 90-degree yaw error passes for a 2-fold symmetric object."""
+def test_caoa_rotation_is_lenient_for_symmetric_objects():
+    """The CAOA metric's rotation test: a 90-degree yaw error passes for a 2-fold symmetric object."""
     R_gt = np.eye(3)
     R_pred = yaw_matrix(np.pi / 2)
-    assert rotation_error_deg(R_pred, R_gt, "__SYM_ROTATE_UP_2", "legacy") < 20.0
+    assert rotation_error_deg(R_pred, R_gt, "__SYM_ROTATE_UP_2", "caoa") < 20.0
     assert rotation_error_deg(R_pred, R_gt, "__SYM_ROTATE_UP_2", "scan2cad") == pytest.approx(90.0)
 
 

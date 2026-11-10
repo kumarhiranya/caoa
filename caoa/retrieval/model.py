@@ -1,4 +1,4 @@
-"""CAD retrieval model (P11d): a joint embedding of scanned objects and CADs (after Dahnert et al., "Joint Embedding
+"""CAD retrieval model: a joint embedding of scanned objects and CADs (after Dahnert et al., "Joint Embedding
 of 3D Scan and CAD Objects", ICCV 2019), with separate query and CAD encoders, since the domains differ.
 
 Each encoder is the OCAM sparse-conv trunk (`OCAMEncoder`: multi-scale convs, global max + avg pool) followed by a

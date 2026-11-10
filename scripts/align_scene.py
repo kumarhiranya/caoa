@@ -3,14 +3,14 @@
     uv run python scripts/align_scene.py --ply <scene>_vh_clean_2.ply --instances <scene>_sg_preds.npz --out <scene>.json \
         [--release "<caoa_data>/release_v1"] [--conf 0.3] [--k 10] [--search class|all] [--scan-trs scan.json]
 
-The steps are P11's (`scripts/run_p11.py`), for a single scene and without evaluation (`caoa.inference`, shared with
-`notebooks/single_scene_pipeline.ipynb`):
-1. instances: SoftGroup / SphericalMask format (`caoa.data.softgroup`: run-length masks over the `.ply` vertices,
+The steps are those of `scripts/run_pipeline.py`, for a single scene and without evaluation (`caoa.inference`, shared
+with `notebooks/single_scene_pipeline.ipynb`):
+1. instances: SoftGroup / SphericalMask format (`caoa.data.instances`: run-length masks over the `.ply` vertices,
    1-based `label_id` over the 18 instance classes, `conf`); kept if conf >= `--conf` and of a class a CAD can be (not
    door, window, picture, curtain, shower curtain);
-2. completion: the release CAPCM on the instance points (world frame);
+2. completion: the release CAPCM (`capcm/concat`) on the instance points (world frame);
 3. retrieval: stage 1 = the embedding (class-mapped synsets, or all with `--search all`), top `--k`; stage 2 = the
-   release Siamese OCAM aligns every candidate and the best fit (`sum`: completion + instance Chamfer) is kept;
+   release OCAM (`ocam/final/seed777`; `--ocam` / `--seed` pick another) aligns every candidate and the best fit (`sum`: completion + instance Chamfer) is kept;
 4. output: per instance, the CAD (`catid_cad`, `id_cad`) and its pose: `cad_to_scan` (4 x 4, the CAD's
    `model_normalized.obj` into the `.ply` coordinates), `cad_to_world` (into the Scan2CAD world frame) and `trs` (that
    world pose as translation, rotation quaternion w x y z and scale, the format of a Scan2CAD `aligned_models` entry),
@@ -43,9 +43,11 @@ def main():
     parser.add_argument("--search", choices=("class", "all"), default="class")
     parser.add_argument("--scan-trs", default=None, help="JSON file with the scan's Scan2CAD trs")
     parser.add_argument("--workers", type=int, default=8)
+    parser.add_argument("--ocam", default="final", help="OCAM variant in the release (ocam/<variant>/seed<seed>)")
+    parser.add_argument("--seed", type=int, default=777)
     args = parser.parse_args()
     paths = load_paths()
-    release = Release(Path(args.release) if args.release else paths.cache.parent / "release_v1")
+    release = Release(Path(args.release) if args.release else paths.cache.parent / "release_v1", ocam=args.ocam, seed=args.seed)
     trs = json.loads(Path(args.scan_trs).read_text()) if args.scan_trs else None
     run = run_scene(release, args.ply, args.instances, paths, args.conf, args.k, args.search, trs, args.workers)
     scan = run["scan"]

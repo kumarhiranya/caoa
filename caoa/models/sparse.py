@@ -1,7 +1,7 @@
 """MinkowskiEngine-style sparse ops on top of spconv.
 
-The legacy OCAM network was written for MinkowskiEngine (ME). These helpers
-reproduce the ME semantics it relied on:
+The OCAM network was designed on MinkowskiEngine (ME). These helpers
+reproduce the ME semantics it relies on:
 
 * `voxelize`: floor continuous coordinates to voxels and average the point
   features in each voxel (ME TensorField.sparse(), UNWEIGHTED_AVERAGE).
@@ -72,7 +72,7 @@ class StridedMaxPool(spconv.SparseModule):
     """Kernel-3 stride-2 max pool with ME output sites.
 
     spconv's max pool returns max(0, max(inputs)); ME's returns max(inputs), and
-    the legacy network pools LeakyReLU outputs, which can be negative. Shifting
+    the network pools LeakyReLU outputs, which can be negative. Shifting
     the features to be positive first makes spconv's result the true max.
     """
 

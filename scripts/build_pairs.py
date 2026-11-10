@@ -2,7 +2,7 @@
 
     uv run python scripts/build_pairs.py [--jobs 8] [--limit N] [--overwrite]
 
-Prints a summary, the pair counts under each class rule, and a sanity check:
+Prints a summary, the pair counts (OCAM and SEM sets), and a sanity check:
 the share of each instance's points that lie inside its annotated box (padded
 by 10%). A wrong instance numbering shows up as a low share.
 """
@@ -71,9 +71,9 @@ def main():
 
     print(f"\nscenes: {len(scenes)} {dict(n_scenes)}   pairs matched: {totals['matched']}   cached: {totals['kept']}")
     print(f"dropped: {totals['missing_instance']} instance id not in scene")
-    for rule in pairs_mod.CLASS_RULES:
-        kept = pairs_mod.apply_class_rule(all_pairs, rule)
-        print(f"class rule {rule:<14} train {sum(p.split == 'train' for p in kept):>5}  val {sum(p.split == 'val' for p in kept):>5}")
+    for name, relabelled in (("OCAM / CAPCM", pairs_mod.RELABELLED), ("SEM", pairs_mod.SEM_RELABELLED)):
+        kept = pairs_mod.apply_class_names(all_pairs, relabelled)
+        print(f"{name:<14} train {sum(p.split == 'train' for p in kept):>5}  val {sum(p.split == 'val' for p in kept):>5}")
     print("instance classes:", dict(collections.Counter(p.scannet_class for p in all_pairs).most_common()))
     print(f"points per instance: median {np.median(n_points):.0f}, min {n_points.min()}, max {n_points.max()}")
     print(

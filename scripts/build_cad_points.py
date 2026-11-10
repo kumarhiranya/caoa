@@ -1,4 +1,4 @@
-"""CAD surface points for the Siamese OCAM (P10b): 8,192 uniform samples per Scan2CAD CAD, in the CAD's own
+"""CAD surface points for the Siamese OCAM: 8,192 uniform samples per Scan2CAD CAD, in the CAD's own
 bounding-box frame (centred, longest side 1; no annotation). One .npz {catid_idcad: (8192, 3) float32} in
 `<cache>/cad_points_v1/` (~300 MB for the 3,049 CADs).
 
@@ -23,7 +23,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     paths = load_paths()
-    with open(paths.legacy_repo / "scan2cad_annotator/s2c_cad_splits.pkl", "rb") as f:
+    with open(paths.s2c_cad_splits, "rb") as f:
         splits = pickle.load(f)
     keys = sorted({"_".join(path.split("ShapeNetV2/")[1].split("/")[:2]) for phase in splits.values() for path, _ in phase})
     rng = np.random.default_rng(args.seed)

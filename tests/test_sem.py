@@ -1,4 +1,4 @@
-"""P9: vendored PTv3 / SEM."""
+"""The vendored PTv3 and the SEM."""
 
 import pickle
 
@@ -7,13 +7,12 @@ import pytest
 import torch
 
 from caoa.models.ptv3._compat import segment_csr
-from caoa.paths import load_paths
+from caoa.paths import REPO_ROOT, load_paths
 
 PATHS = load_paths()
 needs_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
-RUN = "S2Csym_emb128_bce_vox1cm_wd1e-03_b64_lr1e-04_bbcls-ptv3-v1m1-0-shapenet_v2_mini_ptv3cls_softmax_symbinary_cad_bce_adam_cosineannealing"
-CKPT = PATHS.legacy_repo / "checkpoints/symmetry_ptv3" / RUN / f"{RUN}.pth"
-needs_sem = pytest.mark.skipif(not CKPT.exists(), reason="legacy SEM checkpoint missing")
+CKPT = REPO_ROOT / "outputs/sem/model_recalibrated.pth"
+needs_sem = pytest.mark.skipif(not CKPT.exists(), reason="trained SEM missing (scripts/train_sem.py)")
 
 
 @pytest.mark.parametrize("reduce", ["sum", "mean", "max", "min"])
@@ -34,27 +33,28 @@ def test_segment_csr_matches_a_loop(reduce):
 
 @needs_cuda
 @needs_sem
-def test_legacy_sem_checkpoint_reproduces_legacy_embeddings():
-    """The legacy checkpoint loads strictly into the vendored PTv3 and, fed as legacy `build_dataset_sym.py` fed it
-    (`S2CSymmetry`, test split: no augmentation), reproduces `embeddings.npy` up to the random surface sampling."""
-    from caoa.data.shapenet import load_cad_mesh, sample_uniform
-    from caoa.models.sem import SEMClassifier, load_legacy_sem, make_batch
+def test_trained_sem_reproduces_its_embeddings():
+    """The trained SEM loads strictly into the vendored PTv3 and, fed as `scripts/build_sem_embeddings.py` feeds it,
+    reproduces the cached embeddings up to the random surface sampling."""
+    from caoa.data.pose_dataset import sem_embedding_path
+    from caoa.data.shapenet import load_cad_mesh
+    from caoa.models.sem import SEMClassifier, cad_bbox_points, load_sem, make_batch
 
-    legacy = np.load(PATHS.legacy_repo / "data/s2c_symmetry" / RUN / "embeddings.npy", allow_pickle=True).item()
-    with open(PATHS.legacy_repo / "scan2cad_annotator/s2c_cad_splits.pkl", "rb") as f:
+    cached = np.load(sem_embedding_path(PATHS, "sem"), allow_pickle=True).item()
+    with open(PATHS.s2c_cad_splits, "rb") as f:
         items = pickle.load(f)["test"][:16]
     keys = ["_".join(path.split("ShapeNetV2/")[1].split("/")[:2]) for path, _ in items]
-    rng = np.random.default_rng(0)
-    clouds = [sample_uniform(load_cad_mesh(PATHS.shapenet, *k.split("_")), 8192, rng=rng) for k in keys]
+    rng = np.random.default_rng(1)
+    clouds = [cad_bbox_points(load_cad_mesh(PATHS.shapenet, *k.split("_", 1)), rng) for k in keys]
     model = SEMClassifier()
-    load_legacy_sem(model, CKPT)
+    load_sem(model, CKPT)
     with torch.no_grad():
         out = model.cuda().eval()(make_batch(clouds, "cuda"))
     ours = out["emb"].cpu().numpy()
-    ref = np.stack([legacy[k][1] for k in keys])
+    ref = np.stack([cached[k][1] for k in keys])
     cos = (ours * ref).sum(1) / np.linalg.norm(ours, axis=1) / np.linalg.norm(ref, axis=1)
     assert cos.min() > 0.99
-    np.testing.assert_array_equal(out["probs"].argmax(1).cpu().numpy(), np.stack([legacy[k][0] for k in keys]).argmax(1))
+    np.testing.assert_array_equal(out["probs"].argmax(1).cpu().numpy(), np.stack([cached[k][0] for k in keys]).argmax(1))
 
 
 def test_recalibrate_batchnorm_matches_eval_mode_activations():

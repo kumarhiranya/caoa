@@ -1,7 +1,7 @@
 """ScanNet v2 scene loading.
 
 Reproduces SoftGroup's `prepare_data_inst.py` (the `*_inst_nostuff_v2.pth`
-files the legacy code and the S2C-Completion annotator read) directly from the
+files the S2C-Completion annotator read) directly from the
 raw scene files, so the instance numbering matches `scannet_instance_id`.
 """
 
@@ -74,6 +74,6 @@ def load_scene(scans_dir: Path, scene_id: str) -> Scene:
 
 
 def dominant_label(semantic: np.ndarray) -> int:
-    """Most frequent non-wall/floor label of an instance (legacy `get_dominant_label`)."""
+    """Most frequent non-wall/floor label of an instance."""
     valid = semantic[semantic > 1]
     return int(np.bincount(valid).argmax()) if len(valid) else IGNORE

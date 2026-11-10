@@ -1,4 +1,4 @@
-"""CAD retrieval, stage 2 (P11d), on the GT instances: re-rank the stage-1 top-k with the Siamese OCAM, choosing CAD
+"""CAD retrieval, stage 2, on the GT instances: re-rank the stage-1 top-k with the Siamese OCAM, choosing CAD
 and pose together. The method and the reported selections are in `caoa/retrieval/pipeline.py`; this runs it on the 1,864
 val pairs, with stage 1 restricted to the GT CAD's synset. Output: `outputs/rerank_<retrieval>__<pose>__k<k>/results.json`.
 
@@ -27,8 +27,8 @@ def load_cfg(run):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--retrieval", default="retrieval_embed_comp_inst")
-    parser.add_argument("--pose", default="siamunshared_world_comp_concat_only_emb1024")
+    parser.add_argument("--retrieval", default="retrieval")
+    parser.add_argument("--pose", default="ocam_final")
     parser.add_argument("--k", type=int, default=10)
     parser.add_argument("--yaws", type=int, default=8)
     parser.add_argument("--workers", type=int, default=20)
@@ -45,8 +45,8 @@ def main():
     db_index = {k: i for i, k in enumerate(keys)}
     db_points = torch.from_numpy(db["points"]).to(device)
     comp_cfg = pcfg["data"]["completion"]
-    completions = load_pose_completions(paths.cache, comp_cfg["name"], comp_cfg["frame"])
-    pairs = load_pairs(paths.cache, "val", class_rule=pcfg["data"]["class_rule"])
+    completions = load_pose_completions(paths.cache, comp_cfg["name"], comp_cfg.get("frame", "world"))
+    pairs = load_pairs(paths.cache, "val")
     if args.limit:
         pairs = pairs[: args.limit]
     targets = torch.tensor([db_index[cad_key(p)] for p in pairs])
@@ -62,7 +62,7 @@ def main():
     cols = [[keys[j] for j in row] + [cad_key(p)] for row, p in zip(top, pairs)]
     cand_keys = {key for row in cols for key in row}
     print(f"{len(pairs)} objects, k={args.k}: {len(cand_keys)} unique candidate CADs")
-    cad_points, sym_embeddings, cad_box = pipeline.prepare_candidates(cand_keys, paths, device, args.workers, pcfg["model"].get("sym_embedding"))
+    cad_points, sym_embeddings, cad_box = pipeline.prepare_candidates(cand_keys, paths, device, pcfg["model"].get("sym_embedding"), args.workers)
     ocam = pipeline.load_ocam(pcfg, REPO_ROOT / "outputs" / args.pose / "model_final.pth", device)
     pred, target, nscale, noff, scores = pipeline.align(pairs, completions, cols, pcfg, ocam, cad_points, sym_embeddings, device)
     results = pipeline.evaluate_selections(pairs, cols, pred, target, nscale, noff, scores, scan2cad.load_annotations(paths.s2c_annotations),

@@ -1,4 +1,4 @@
-"""Pose losses beyond legacy's per-component L1 (P10c)."""
+"""Pose losses beyond the per-component L1: the paper's Chamfer term."""
 
 import torch
 
@@ -12,7 +12,7 @@ def box_points(pose: torch.Tensor, unit: torch.Tensor) -> torch.Tensor:
 
 
 def chamfer_pose_loss(pred: torch.Tensor, target: torch.Tensor, unit: torch.Tensor) -> torch.Tensor:
-    """P10c (user, 2026-10-28): Chamfer (legacy chamfer_3DDist form, mean(d1) + mean(d2) of squared distances) between
-    the CAD placed by the predicted and by the GT box pose."""
+    """Chamfer distance (mean(d1) + mean(d2) of squared distances) between the CAD placed by the predicted and by the
+    GT box pose."""
     d1, d2 = nn_squared_distances(box_points(pred, unit), box_points(target, unit))
     return d1.mean() + d2.mean()

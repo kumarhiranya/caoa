@@ -34,8 +34,7 @@ def bbox_matrix(model: dict) -> np.ndarray:
 def oriented_box(model: dict):
     """(center, rotation, full extents) of the model's bounding box in world coordinates.
 
-    This is the alignment target the legacy code trains and scores against
-    (`calc_Mbbox`), as opposed to the CAD model's own `trs`.
+    This is the alignment target the OCAM is trained and scored against, as opposed to the CAD model's own `trs`.
     """
     t, R, half = decompose(bbox_matrix(model))
     return t, R, 2.0 * half

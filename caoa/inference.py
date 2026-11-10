@@ -1,18 +1,18 @@
 """The full pipeline on one scan, stage by stage, with the release models (`scripts/make_release.py`).
 
 Used by `scripts/align_scene.py` (all stages, JSON out) and `notebooks/single_scene_pipeline.ipynb` (each stage shown).
-The stages are P11's (`scripts/run_p11.py`) without the dataset-wide evaluation:
+The stages are those of `scripts/run_pipeline.py`, without the dataset-wide evaluation:
 
 1. `load_scan`: the `.ply` vertices, into the Scan2CAD world frame (y up) the models work in;
-2. `load_instances`: SoftGroup / SphericalMask predictions (`caoa.data.softgroup` format), kept if conf >= `conf` and of a
+2. `load_instances`: SoftGroup / SphericalMask predictions (`caoa.data.instances` format), kept if conf >= `conf` and of a
    class a CAD can be; each becomes a `Pair` whose GT fields are placeholders (identity box: the completion storage frame
    is then the world frame);
 3. `complete_instances`: the release CAPCM on the instance points (world frame);
 4. `retrieve`: stage 1, the retrieval embedding against the ShapeNetV2 database (class-mapped synsets or all), top k;
 5. `align_candidates`: stage 2, SEM on every candidate CAD, the Siamese OCAM aligns the object to each, fit scores;
 6. `assemble`: the best fit per instance (`sum` score), its CAD pose in the scan and world frames.
-`evaluate_scene` scores the result against the S2C-C annotation of a ScanNet val scene, per object (legacy metric,
-Scan2CAD criteria with the chosen CAD, box criteria), for objects matched by an instance (IoU >= 0.5), as P11.
+`evaluate_scene` scores the result against the S2C-C annotation of a ScanNet val scene, per object (box criteria, CAOA
+metric, Scan2CAD criteria with the chosen CAD), for the objects matched by an instance (IoU >= 0.5).
 """
 
 import json
@@ -26,10 +26,10 @@ import yaml
 from plyfile import PlyData
 
 from caoa.data import scan2cad
-from caoa.data.legacy_sampling import tile_to_min
+from caoa.data.sampling import tile_to_min
 from caoa.data.pairs import Pair
 from caoa.data.pose_completion import MIN_POINTS, complete, to_canonical
-from caoa.data.softgroup import (
+from caoa.data.instances import (
     EXCLUDED_CLASSES,
     INSTANCE_CLASSES,
     rle_decode,
@@ -44,7 +44,7 @@ from caoa.geometry import (
     quat_to_matrix,
     transform_points,
 )
-from caoa.models.odgnet import UpTrans, load_legacy_checkpoint
+from caoa.models.odgnet import UpTrans, load_checkpoint
 from caoa.retrieval import pipeline
 from caoa.retrieval import search as rsearch
 from caoa.retrieval.data import fixed_queries
@@ -97,22 +97,26 @@ class Alignment:
 
 
 class Release:
-    """The release folder: configs and checkpoints, models loaded on demand."""
+    """The release folder (`scripts/make_release.py`): configs and checkpoints, models loaded on demand. `ocam` / `seed`
+    pick the alignment model (`ocam/<ocam>/seed<seed>`); the pipeline's CAPCM is `capcm/concat`."""
 
-    def __init__(self, root, device="cuda"):
+    def __init__(self, root, device="cuda", ocam: str = "final", seed: int = 777):
         self.root = Path(root)
         self.device = torch.device(device)
-        self.capcm_cfg = yaml.safe_load((self.root / "capcm/config.yaml").read_text())
+        self.capcm_dir = self.root / "capcm/concat"
+        self.ocam_dir = self.root / "ocam" / ocam / f"seed{seed}"
+        self.capcm_cfg = yaml.safe_load((self.capcm_dir / "config.yaml").read_text())
         self.rcfg = yaml.safe_load((self.root / "retrieval/config.yaml").read_text())
-        self.pcfg = yaml.safe_load((self.root / "ocam/config.yaml").read_text())
-        sym = self.pcfg["model"]["sym_embedding"]
-        sym["checkpoint"] = str(self.root / sym["checkpoint"])  # absolute (`sem_checkpoint` joins it to the repo root)
+        self.pcfg = yaml.safe_load((self.ocam_dir / "config.yaml").read_text())
+        sym = self.pcfg["model"].get("sym_embedding")
+        if sym:
+            sym["checkpoint"] = str(self.root / sym["checkpoint"])  # absolute (`sem_checkpoint` joins it to the repo root)
         self.synsets = json.loads((self.root / "class_synsets.json").read_text())
         self.manifest = json.loads((self.root / "manifest.json").read_text())
 
     def capcm(self):
         model = UpTrans.from_config(self.capcm_cfg["model"]).to(self.device).eval()
-        load_legacy_checkpoint(model, self.root / "capcm/ckpt-best.pth")
+        load_checkpoint(model, self.capcm_dir / "ckpt-best.pth")
         return model
 
     def retrieval(self):
@@ -125,7 +129,7 @@ class Release:
         return db["keys"].tolist(), db["catids"], torch.from_numpy(db["embeddings"]).to(self.device)
 
     def ocam(self):
-        return pipeline.load_ocam(self.pcfg, self.root / "ocam/model_final.pth", self.device)
+        return pipeline.load_ocam(self.pcfg, self.ocam_dir / "model_final.pth", self.device)
 
 
 def load_scan(ply, trs: dict | None = None) -> Scan:
@@ -180,7 +184,8 @@ def retrieve(release: Release, inst: Instances, comps: dict, k: int = 10, search
 def align_candidates(release: Release, inst: Instances, comps: dict, cands: Candidates, paths, workers: int = 8) -> Alignment:
     cols = [row + [row[0]] for row in cands.keys]  # `pipeline.align` expects a last (GT) column: repeat the top-1
     cad_points, sym_emb, cad_box, sym_probs = pipeline.prepare_candidates({c for row in cols for c in row}, paths, release.device,
-                                                                          workers, release.pcfg["model"]["sym_embedding"], return_probs=True)
+                                                                          release.pcfg["model"].get("sym_embedding"), workers,
+                                                                          return_probs=True)
     ocam = release.ocam()
     pred, _, nscale, noff, scores = pipeline.align(inst.pairs, comps, cols, release.pcfg, ocam, cad_points, sym_emb, release.device)
     k = len(cands.keys[0])
@@ -219,7 +224,7 @@ def assemble(scan: Scan, inst: Instances, cands: Candidates, al: Alignment, scor
         b = int(al.scores[score][i].argmin())
         key = cands.keys[i][b]
         objects.append({**m, **candidate_pose(scan, cands, al, i, b), "rank_stage1": b, "fit_score": float(al.scores[score][i, b]),
-                        "symmetric_prob": float(al.sym_probs[key][1]), "candidates": cands.keys[i]})
+                        "symmetric_prob": float(al.sym_probs[key][1]) if al.sym_probs else None, "candidates": cands.keys[i]})
     return objects
 
 
@@ -251,10 +256,10 @@ def run_scene(release: Release, ply, preds_file, paths, conf: float = 0.3, k: in
 
 def evaluate_scene(run: dict, scans_dir, s2c_annotations: dict, val_pairs, iou_threshold: float = 0.5) -> list[dict]:
     """Per S2C-C object of the scene: the matched instance (IoU >= threshold, one-to-one) and whether the final pose
-    passes the legacy metric, Scan2CAD's criteria (−center, with the chosen CAD) and the box criteria. The scan must be
+    passes the box criteria, the CAOA metric and Scan2CAD's criteria (−center, with the chosen CAD). The scan must be
     loaded with the scene's Scan2CAD `trs`."""
     from caoa.data.scannet import load_scene
-    from caoa.data.softgroup import Instance, match_instances
+    from caoa.data.instances import Instance, match_instances
     from caoa.eval import box_criteria, metrics
     from caoa.eval import scan2cad_benchmark as s2c
 
@@ -277,9 +282,9 @@ def evaluate_scene(run: dict, scans_dir, s2c_annotations: dict, val_pairs, iou_t
             b = o["rank_stage1"]
             ns, no = al.nscale[i, b], al.noff[i, b]
             target = np.concatenate([p.box_center * ns - no, p.box_rotation.reshape(9), p.box_extents * ns])
-            legacy = metrics.alignment_errors(*(x[None] for x in (al.pred[i, b, :3], al.pred[i, b, 3:12].reshape(3, 3), al.pred[i, b, 12:])),
+            caoa = metrics.alignment_errors(*(x[None] for x in (al.pred[i, b, :3], al.pred[i, b, 3:12].reshape(3, 3), al.pred[i, b, 12:])),
                                               target[None, :3], target[None, 3:12].reshape(1, 3, 3), target[None, 12:], [p.sym],
-                                              metrics.MetricConfig.legacy())
+                                              metrics.MetricConfig.caoa())
             model = anno["aligned_models"][p.model_index]
             a = alignment_from_box(anno["trs"], o["catid_cad"], o["id_cad"], o["cad_box"]["half_extents"], o["cad_box"]["center"],
                                    al.centers[i, b], al.rotations[i, b], al.extents[i, b], "minus_center")
@@ -287,7 +292,7 @@ def evaluate_scene(run: dict, scans_dir, s2c_annotations: dict, val_pairs, iou_t
                                                  (p.box_center, p.box_rotation, p.box_extents), p.sym, anno["trs"])
             row.update({"instance": i, "iou": iou, "label": o["label"], "retrieved_cad": f"{o['catid_cad']}_{o['id_cad']}",
                         "exact_cad": f"{o['catid_cad']}_{o['id_cad']}" == row["gt_cad"],
-                        "gt_in_topk": row["gt_cad"] in o["candidates"], "legacy": bool(legacy["ok"][0]),
+                        "gt_in_topk": row["gt_cad"] in o["candidates"], "caoa": bool(caoa["ok"][0]),
                         "s2c_criteria": bool(s2c.is_correct(a, *s2c.ground_truth_pose(anno["trs"], model), model["sym"])),
                         "box_ok": bool(et <= s2c.THRESHOLD_TRANSLATION and er <= s2c.THRESHOLD_ROTATION and es <= s2c.THRESHOLD_SCALE),
                         "err_t_m": et, "err_r_deg": er, "err_s_pct": es})

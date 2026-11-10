@@ -1,18 +1,18 @@
-"""Retrieval + alignment for a list of objects (P11d stage 2, shared by `scripts/rerank_retrieval.py` and P11).
+"""Retrieval + alignment for a list of objects (shared by `scripts/rerank_retrieval.py` and `scripts/run_pipeline.py`).
 
 An object is a `Pair`: its `points` are the observed instance (GT or predicted), its completion is given in the pair's
 storage frame (`pose_completion.to_canonical`), and its CAD fields name the GT CAD of the S2C-C object it is evaluated
 against (the target box is that object's GT box).
 
 1. `stage1`: the retrieval embedding's top-k CADs per object, within an allowed set (a boolean mask over the database).
-2. `prepare_candidates`: every candidate sampled as the P10b Siamese OCAM was trained (8,192 uniform points in the CAD's
+2. `prepare_candidates`: every candidate sampled as the Siamese OCAM is trained (8,192 uniform points in the CAD's
    own bounding-box frame) plus its SEM `cad_bbox` embedding and the mesh's own box (centre, half extents).
 3. `align`: one OCAM forward per (object, candidate), the candidate placed in the predicted box (unit-box points
    R (s * u) + t) and scored against the object in the OCAM test frame: `comp` = two-sided CD-L1 to the completion,
    `inst` = one-sided mean distance from the instance points, `sum` = both. The last candidate column is the GT CAD.
 4. `evaluate_selections`: per selection (`stage1`, `rerank_<score>`, `oracle_topk` = the candidate closest to the GT
-   CAD, `gt_cad`): exact hit, CD-L1 to the GT CAD, legacy metric on the box, S2C criteria with the chosen CAD's own box
-   (unchanged code) and the CAD-independent `s2c_box`.
+   CAD, `gt_cad`): exact hit, CD-L1 to the GT CAD, the CAOA metric on the box, S2C criteria with the chosen CAD's own
+   box and the CAD-independent `s2c_box`.
 """
 
 import dataclasses
@@ -22,15 +22,15 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-from caoa.data.legacy_sampling import sample_points
+from caoa.data.sampling import sample_points
 from caoa.data.pose_dataset import ObjectPoseDataset, PoseDataConfig, collate
 from caoa.data.shapenet import load_cad_mesh, sample_uniform
-from caoa.eval import box_criteria, groupings, legacy_report, scan2cad_benchmark
+from caoa.eval import box_criteria, caoa_metric, groupings, scan2cad_benchmark
 from caoa.eval.pose_eval import to_world
 from caoa.models.chamfer import nn_squared_distances
 from caoa.models.ocam import OCAMObjectOnly, OCAMSiamese
 from caoa.models.pose_losses import box_points
-from caoa.models.sem import SEMClassifier, load_legacy_sem, make_batch, sem_checkpoint
+from caoa.models.sem import SEMClassifier, load_sem, make_batch, sem_checkpoint
 from caoa.retrieval import search
 from caoa.retrieval.data import cad_key, world_completion
 
@@ -114,30 +114,32 @@ def stage1(rmodel, queries: np.ndarray, db_emb: torch.Tensor, allowed: torch.Ten
     return sim.topk(k, dim=1).indices.cpu().numpy()
 
 
-def prepare_candidates(keys, paths, device, workers: int = 20, sym_cfg: dict | None = None, return_probs: bool = False):
+def prepare_candidates(keys, paths, device, sym_cfg: dict | None, workers: int = 20, return_probs: bool = False):
     """{key: 8,192 bbox-frame points}, {key: SEM embedding}, {key: (mesh box centre, half extents)}. The SEM is the pose
-    config's (`sym_cfg` = its `model.sym_embedding`, `caoa.models.sem.sem_checkpoint`; default the legacy run).
+    config's (`sym_cfg` = its `model.sym_embedding`, `caoa.models.sem.sem_checkpoint`; none without SEM).
     `return_probs`: also {key: SEM class probabilities (not symmetric, symmetric)}."""
     cad_points, sem_clouds, cad_box = {}, {}, {}
     with Pool(workers, initializer=_init, initargs=(paths.shapenet,)) as pool:
         for key, cad, sem, center, half in pool.imap_unordered(sample_candidate, sorted(keys), chunksize=8):
             cad_points[key], sem_clouds[key], cad_box[key] = cad, sem, (center, half)
+    if not sym_cfg:  # an OCAM without SEM: no embeddings needed
+        return (cad_points, {}, cad_box, {}) if return_probs else (cad_points, {}, cad_box)
     sem_model = SEMClassifier()
-    load_legacy_sem(sem_model, sem_checkpoint(paths, sym_cfg))
+    load_sem(sem_model, sem_checkpoint(sym_cfg))
     sem_model = sem_model.to(device).eval()
     order, sym_embeddings, sym_probs = sorted(keys), {}, {}
     with torch.no_grad():
         for s in range(0, len(order), 32):
             chunk = order[s : s + 32]
-            r = sem_model(make_batch([sem_clouds[k] for k in chunk], device, grid="train"))
+            r = sem_model(make_batch([sem_clouds[k] for k in chunk], device))
             sym_embeddings.update(zip(chunk, r["emb"].cpu().numpy().astype(np.float32)))
             sym_probs.update(zip(chunk, r["probs"].cpu().numpy()))
     return (cad_points, sym_embeddings, cad_box, sym_probs) if return_probs else (cad_points, sym_embeddings, cad_box)
 
 
 def load_ocam(pcfg: dict, checkpoint, device):
-    """The pose config's OCAM: Siamese (P10b) if it has `model.siamese`, else single-trunk (object [+ SEM] only: the
-    baseline and no-completion rows of paper Table 1). SEM width 128 iff `model.sym_embedding`."""
+    """The pose config's OCAM: Siamese if it has `model.siamese`, else single-trunk (object [+ SEM] only: e.g. the
+    baseline and no-completion OCAMs). SEM width 128 iff `model.sym_embedding`."""
     ext = 128 if pcfg["model"].get("sym_embedding") else 0
     if pcfg["model"].get("siamese"):
         ocam = OCAMSiamese(embedding=pcfg["model"]["embedding"], ext_emb_size=ext, shared=pcfg["model"]["siamese"]["shared"])
@@ -167,7 +169,7 @@ def align(pairs, completions: dict, cols: list[list[str]], pcfg: dict, ocam, cad
             catid, id_cad = key.split("_", 1)
             flat_pairs.append(dataclasses.replace(p, catid_cad=catid, id_cad=id_cad))
             query_of.append(qi)
-    data = {k: tuple(v) if isinstance(v, list) else v for k, v in pcfg["data"].items() if k not in ("class_rule", "completion")}
+    data = {k: tuple(v) if isinstance(v, list) else v for k, v in pcfg["data"].items() if k != "completion"}
     ds = ObjectPoseDataset(flat_pairs, False, PoseDataConfig(**data), completions if comp_cfg else None,
                            comp_cfg["mode"] if comp_cfg else None, sym_embeddings if use_sym else None, cad_points if siamese else None)
     loader = DataLoader(Seeded(ds, query_of), batch_size=64, num_workers=8, collate_fn=collate)
@@ -232,8 +234,8 @@ def evaluate_selections(pairs, cols, pred, target, nscale, noff, scores, annos, 
     results = {}
     for name, c in choice.items():
         P, T = pred[qi, c].numpy(), target[qi, 0].numpy()
-        legacy = legacy_report.eval_pose_report(P, T, syms, labels)["avg"]
-        table1 = legacy_report.eval_pose_report(P, T, syms, groupings.class_labels(pairs, "table1"))["per_class"]["total"]
+        caoa = caoa_metric.eval_pose_report(P, T, syms, labels)["avg"]
+        table1 = caoa_metric.eval_pose_report(P, T, syms, groupings.class_labels(pairs, "table1"))["per_class"]["total"]
         centers, rotations, extents = to_world(P, nscale[qi, c].numpy(), noff[qi, c].numpy())
         chosen = [cols[i][c[i]] for i in qi]
         ok = {conv: [] for conv in scan2cad_benchmark.CONVENTIONS}
@@ -255,8 +257,8 @@ def evaluate_selections(pairs, cols, pred, target, nscale, noff, scores, annos, 
             "exact_hit": float(np.mean([chosen[i] == cad_key(p) for i, p in enumerate(pairs)])),
             "category_acc": float(np.mean([chosen[i].split("_", 1)[0] == p.catid_cad for i, p in enumerate(pairs)])),
             "cd_l1_to_gt": float(cd.mean()),
-            "legacy_total_acc": legacy["total_acc"], "legacy_q_acc": legacy["q_acc"], "legacy_s_acc": legacy["s_acc"],
-            "legacy_table1": {"micro": table1["micro_avg"], "macro": table1["macro_avg"]},  # Paper Table 1's grouping
+            "caoa_total_acc": caoa["total_acc"], "caoa_q_acc": caoa["q_acc"], "caoa_s_acc": caoa["s_acc"],
+            "caoa_table1": {"micro": table1["micro_avg"], "macro": table1["macro_avg"]},  # the paper's Table 1 grouping
             "s2c_criteria": crit,
             "s2c_box": box_criteria.evaluate_boxes(pairs, centers, rotations, extents, annos),
         }
@@ -265,7 +267,7 @@ def evaluate_selections(pairs, cols, pred, target, nscale, noff, scores, annos, 
 
 def summary_line(name: str, r: dict) -> str:
     c = r["s2c_criteria"]
-    return (f"{name:22s} exact {r['exact_hit']:.3f}  cat {r['category_acc']:.3f}  CD-L1 to GT {r['cd_l1_to_gt']:5.1f}  legacy {r['legacy_total_acc']:.4f} "
-            f"(rot {r['legacy_q_acc']:.3f} scale {r['legacy_s_acc']:.3f})  S2C −center {c['minus_center']['instance_mean']:.4f} / "
+    return (f"{name:22s} exact {r['exact_hit']:.3f}  cat {r['category_acc']:.3f}  CD-L1 to GT {r['cd_l1_to_gt']:5.1f}  CAOA {r['caoa_total_acc']:.4f} "
+            f"(rot {r['caoa_q_acc']:.3f} scale {r['caoa_s_acc']:.3f})  S2C −center {c['minus_center']['instance_mean']:.4f} / "
             f"{c['minus_center']['class_mean']:.4f}  plain {c['plain']['instance_mean']:.4f}  "
             f"box {r['s2c_box']['instance_mean']:.4f} / {r['s2c_box']['class_mean']:.4f}")

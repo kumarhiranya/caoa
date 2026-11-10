@@ -1,26 +1,22 @@
-"""Object-only pose samples, as the legacy `S2CCompletionPoseV2` built them.
+"""Object pose samples for the OCAM.
 
-Train: points in the canonical frame of the target box (axis-aligned,
-centred, largest side 1), then a random yaw / isotropic scale / translation;
-the target is the transformed box.
-Test: points in the Scan2CAD world frame, scaled so the object's largest
-extent is 1 and shifted so the point mean sits at (0.1, 0.1, 0.1); the target
-is the GT box in that frame. `norm_scale` / `norm_offset` map predictions back
-to metres.
+Train: points in the canonical frame of the target box (axis-aligned, centred, largest side 1), then a random yaw /
+isotropic scale / translation; the target is the transformed box.
+Test: points in the Scan2CAD world frame, scaled so the object's largest extent is 1 and shifted so the point mean sits
+at (0.1, 0.1, 0.1); the target is the GT box in that frame. `norm_scale` / `norm_offset` map predictions back to
+metres.
 
-With completion (P8), the per-pair completed points (`scripts/build_pose_completions.py`,
-in the same canonical frame; `caoa.data.pose_completion`) replace the instance points (`completion_mode="only"`,
-legacy `completion_points_only`) or are appended to them ("inst+comp"); at test time
-they are mapped back to the world frame first, so the normalisation covers them, as legacy.
+With completions (`scripts/build_pose_completions.py`, stored in the same canonical frame; `caoa.data.pose_completion`),
+the per-pair completed points replace the instance points (`completion_mode="only"`) or are appended to them
+("inst+comp"); at test time they are mapped back to the world frame first, so the normalisation covers them.
 
-With `sym_embeddings` (P10a), each sample also carries the SEM embedding of its GT CAD (`sym_emb`), looked up
-by `catid_idcad` as legacy `S2CCompletionPoseV2` did (`sym_map[key][1]`).
+With `sym_embeddings` (SEM), each sample also carries the SEM embedding of its CAD (`sym_emb`), by `catid_idcad`.
 
-With `cad_points` (P10b, Siamese), each sample also carries its GT CAD (user decisions 2026-10-28): the CAD's surface
-points in the CAD's own bounding-box frame (centred, longest side 1; no annotation, not augmented) as the CAD branch
-input (`cad_coords` / `cad_feats`), and `CHAMFER_POINTS` of them in unit-box coordinates (`cad_unit`, the CAD's
-bounding box mapped to [-0.5, 0.5]^3) for the Chamfer loss: a box pose (t, R, s) places them at R (s * u) + t, the
-same box OCAM predicts, so the loss compares the CAD at the predicted and at the GT pose.
+With `cad_points` (Siamese OCAM), each sample also carries its CAD: the CAD's surface points in the CAD's own
+bounding-box frame (centred, longest side 1; not augmented) as the CAD branch input (`cad_coords` / `cad_feats`), and
+`CHAMFER_POINTS` of them in unit-box coordinates (`cad_unit`, the CAD's bounding box mapped to [-0.5, 0.5]^3) for the
+Chamfer loss: a box pose (t, R, s) places them at R (s * u) + t, the same box the OCAM predicts, so the loss compares
+the CAD at the predicted and at the GT pose.
 """
 
 from dataclasses import dataclass
@@ -30,7 +26,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from caoa.data.legacy_sampling import sample_points, tile_to_min
+from caoa.data.sampling import sample_points, tile_to_min
 from caoa.data.pairs import Pair
 from caoa.geometry import yaw_matrix
 
@@ -39,7 +35,7 @@ from caoa.geometry import yaw_matrix
 class PoseDataConfig:
     num_points: int = 8192
     voxel_size: float = 0.01
-    min_points: int = 2048  # instances are tiled up to this when cached (legacy SamplePointsFrom2Array)
+    min_points: int = 2048  # instances are tiled up to this
     rot_range_deg: tuple[int, int] = (-180, 180)
     scale_range: tuple[float, float] = (0.4, 1.4)
     scale_aspect_range: tuple[float, float] = (0.0, 0.0)
@@ -51,15 +47,12 @@ COMPLETION_MODES = ("only", "inst+comp")
 CHAMFER_POINTS = 2048
 
 
-SEM_FRAMES = ("legacy_export", "cad_bbox")
+SEM_FRAMES = ("cad_bbox",)
 
 
-def sem_embedding_path(paths, run: str, frame: str = "legacy_export") -> Path:
-    """`legacy_export`: the legacy `data/s2c_symmetry/<run>/embeddings.npy` (exported with inputs the checkpoint was
-    not trained on: every CAD predicted not symmetric, docs/results/P9.md). `cad_bbox` (the fix,
-    `scripts/build_sem_embeddings.py`): the CAD in its own bounding-box frame, as the checkpoint was trained."""
-    if frame == "legacy_export":
-        return Path(paths.legacy_repo) / "data/s2c_symmetry" / run / "embeddings.npy"
+def sem_embedding_path(paths, run: str, frame: str = "cad_bbox") -> Path:
+    """SEM embeddings of every CAD (`scripts/build_sem_embeddings.py`): the CAD in its own bounding-box frame, as the
+    SEM is trained."""
     if frame == "cad_bbox":
         return Path(paths.cache) / "sem_embeddings_v1" / f"{run}__{frame}" / "embeddings.npy"
     raise ValueError(f"SEM embedding frame {frame!r}; one of {SEM_FRAMES}")
@@ -79,7 +72,7 @@ def load_cad_points(cache_root) -> dict[str, np.ndarray]:
 
 
 def load_sym_embeddings(path: Path) -> dict[str, np.ndarray]:
-    """Legacy `data/s2c_symmetry/<model>/embeddings.npy`: {catid_idcad: (class probabilities, embedding)} -> embeddings."""
+    """`embeddings.npy`: {catid_idcad: (class probabilities, embedding)} -> embeddings."""
     return {k: np.asarray(v[1], dtype=np.float32) for k, v in np.load(path, allow_pickle=True).item().items()}
 
 
@@ -118,7 +111,7 @@ class ObjectPoseDataset(Dataset):
         if self.completion_mode is not None:
             completed = self.completions[(p.scene_id, p.model_index)].astype(np.float64)
             canonical = completed if self.completion_mode == "only" else np.concatenate([canonical, completed])
-            points = (canonical * longest) @ p.box_rotation.T + p.box_center  # back to world (legacy denorm_tmat)
+            points = (canonical * longest) @ p.box_rotation.T + p.box_center  # back to world
 
         if self.train:
             t, R, scale = self._augment()

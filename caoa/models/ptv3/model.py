@@ -2,8 +2,8 @@
 Point Transformer - V3 Mode1
 Pointcept detached version
 
-Vendored for CAOA (P9) from the legacy repo's `PointTransformerV3/model.py` (md5 e83766666b92646ea7a6dc44d0df9c49,
-CRLF -> LF). Only the imports changed: `torch_scatter.segment_csr` and timm's `DropPath` come from `_compat`.
+Vendored from Pointcept's detached PointTransformerV3 `model.py` (github.com/Pointcept/PointTransformerV3).
+Only the imports changed: `torch_scatter.segment_csr` and timm's `DropPath` come from `_compat`.
 
 Author: Xiaoyang Wu (xiaoyang.wu.cs@gmail.com)
 Please cite our work if the code is helpful to you.

@@ -1,10 +1,10 @@
-"""SphericalMask inference on ScanNet val, saving per-scene predictions in the cached SoftGroup layout (P11, Sph rows).
+"""SphericalMask inference on ScanNet val, saving per-scene predictions in SoftGroup's file layout.
 
 Runs in SphericalMask's own environment (not this project's): the upstream repo, venv, data and checkpoint live in
-`caoa_data/sphericalmask/` on the lab share (setup: docs/results/P11.md § SphericalMask). Mirrors upstream
+their own folder (setup: docs/sphericalmask.md). Mirrors upstream
 `tools/test.py` (model, dataset, loader, `ScanNetEval`; the checkpoint is loaded strictly after one key rename, see below; the AP printout is the sanity check against
 the published 62.6 AP / 81.9 AP50 on val) and additionally writes `<out>/<scene>_sg_preds.npz` = {"arr_0": {"scan_id",
-"pred_instances", "semantic_preds"}}, the format `caoa.data.softgroup` reads (`pred_instances`: run-length masks over the
+"pred_instances", "semantic_preds"}}, the format `caoa.data.instances` reads (`pred_instances`: run-length masks over the
 scene's vertices in `.ply` order, 1-based `label_id` over the 18 instance classes, `conf`).
 
     cd <sphericalmask>/repo && TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD=1 CUDA_VISIBLE_DEVICES=0 ../venv/bin/python \

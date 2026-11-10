@@ -1,31 +1,28 @@
-# Data locations. Copy to configs/paths.local.yaml (git-ignored) to override
-# per machine, or point CAOA_PATHS at another file.
+# Data locations. Copy to configs/paths.local.yaml (git-ignored) and edit, or point CAOA_PATHS at another file.
+# Relative paths are relative to the repository root.
 
-# Extracted ScanNet v2 scenes: <scannet_scans>/<scene_id>/<scene_id>_vh_clean_2.ply etc.
-scannet_scans: /home/data/datasets/ScanNet_v2/dataset/scans
+# ScanNet v2 scans: <scannet_scans>/<scene_id>/<scene_id>_vh_clean_2.ply, ..._vh_clean_2.0.010000.segs.json, ...aggregation.json
+scannet_scans: data/scannet/scans
 
-# ShapeNetCore v2 (models/model_normalized.obj per CAD model). Local partial mirror of the
-# external drive's "3D Datasets/ShapeNetV2": only the CAD .obj files the pipeline uses (S2C and
-# SN-Indoor), the SN-Indoor partials in the sibling ShapeNetV2-augmented/, and the split files.
-shapenet: /home/data/datasets/ShapeNetV2_caoa/ShapeNetV2
+# ShapeNetCore v2 (<synset>/<model>/models/model_normalized.obj), with the SN-Indoor partials in the sibling
+# ShapeNetV2-augmented/ and its file list aug_train_test_splits.pkl in this folder.
+shapenet: data/ShapeNetV2
 
-# Scan2CAD annotations with the S2C-Completion `scannet_instance_id` field
-s2c_annotations: /home/hiranya/research/Github/vr_reconstruction/scan2cad_annotator/scan2cad_v2_completion_annotations.json
+# Scan2CAD-Completion (S2C-C) annotations: Scan2CAD alignments with the matching ScanNet instance id per object,
+# and the CAD train / val split used by the SEM.
+s2c_annotations: data/s2cc/scan2cad_v2_completion_annotations.json
+s2c_cad_splits: data/s2cc/s2c_cad_splits.pkl
 
-# Official Scan2CAD benchmark inputs (Scan2CAD/dataset in the Scan2CAD repo)
-scan2cad_full_annotations: /home/hiranya/research/Github/vr_reconstruction/Scan2CAD/dataset/full_annotations.json
-scan2cad_cad_appearances: /home/hiranya/research/Github/vr_reconstruction/Scan2CAD/dataset/cad_appearances.json
+# Official Scan2CAD benchmark inputs (Scan2CAD/dataset in the Scan2CAD repository)
+scan2cad_full_annotations: data/scan2cad/full_annotations.json
+scan2cad_cad_appearances: data/scan2cad/cad_appearances.json
 
-# The legacy codebase (read-only reference; used by parity tests)
-legacy_repo: /home/hiranya/research/Github/vr_reconstruction
+# Per-CAD semantic embeddings {catid_idcad: (512,)}, the CAPCM's semantic input (zeros for CADs not in the file)
+semantic_embeddings: data/s2cc/semantic_embeddings.npy
 
-# Legacy SEM (PTv3 classifier) CAD embeddings, {catid_idcad: (512,)}; the completion datasets
-# return them as `sem_emb` (zeros for CADs missing from the file, fix 3). 46 MB.
-semantic_embeddings: /home/hiranya/research/Github/vr_reconstruction/data/ShapeNetSemantic/classification_ptv3/semantic_embeddings.npy
-
-# Legacy target tables (the server's results/ folder: comp.csv, compinst.csv, sg_mnk_comp.csv,
-# perclass_results.csv, ODG_*_S2CC.csv, ...). 49 KB.
-legacy_results: /media/hiranya/KHG Elements/mmlab-server-data/data/hiranya/Github/vr_reconstruction/results
+# Instance predictions on the ScanNet val scans, one <scene>_sg_preds.npz per scene (caoa.data.softgroup)
+softgroup_preds: data/instances/softgroup/val
+sphericalmask_preds: data/instances/sphericalmask/val
 
 # Derived data written by this codebase
 cache: cache

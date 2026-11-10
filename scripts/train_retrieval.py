@@ -1,4 +1,4 @@
-"""Train and evaluate the CAD retrieval embedding (P11d; caoa/retrieval).
+"""Train and evaluate the CAD retrieval embedding (caoa/retrieval).
 
 Queries: S2C-C pairs (completion + instance, world frame); database: every ShapeNetV2 model
 (`scripts/build_shapenet_points.py`). Each step: B queries against their GT CADs, `neg_same_category` random CADs of
@@ -6,7 +6,7 @@ each query's synset and `neg_random` random CADs from the whole database (InfoNC
 the val pairs every `val_freq` steps (fixed queries, yaw as stored); the final evaluation also reports yaw test-time
 augmentation. Outputs in `outputs/<name>/`: `config.yaml`, `train_log.json`, `model_final.pth`, `results.json`.
 
-    uv run python scripts/train_retrieval.py configs/retrieval/embed_comp_inst.yaml [--max-steps N]
+    uv run python scripts/train_retrieval.py configs/retrieval/retrieval.yaml [--max-steps N]
 """
 
 import argparse
@@ -79,7 +79,7 @@ def main():
     print(f"database: {len(db_index)} ShapeNetV2 models, {len(members)} synsets")
 
     completions = load_pose_completions(paths.cache, dcfg["completion"]["name"], dcfg["completion"]["frame"])
-    pairs = {s: [p for p in load_pairs(paths.cache, s, class_rule=dcfg["class_rule"]) if (p.scene_id, p.model_index) in completions]
+    pairs = {s: [p for p in load_pairs(paths.cache, s) if (p.scene_id, p.model_index) in completions]
              for s in ("train", "val")}
     print(f"pairs: train {len(pairs['train'])} / val {len(pairs['val'])}")
     train_ds = RetrievalQueries(pairs["train"], completions, db_index, train=True, num_points=dcfg["num_points"], inst_fraction=dcfg["inst_fraction"])

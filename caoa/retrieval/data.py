@@ -1,6 +1,6 @@
-"""CAD retrieval queries (P11d; user decisions 2026-11-03).
+"""CAD retrieval queries.
 
-A query is a scanned object: its leak-free CAPCM completion (`completion.frame: world`) plus its instance points, in
+A query is a scanned object: its CAPCM completion (`caoa.data.pose_completion`) plus its instance points, in
 the Scan2CAD world frame (y up), half of the points from each. It is centred on its axis-aligned bounding box and
 scaled so the longest side is 1, the normalisation the database CADs get in their own frame
 (`scripts/build_shapenet_points.py`). The object's yaw is unknown, so training rotates each query by a random yaw
@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
-from caoa.data.legacy_sampling import sample_points
+from caoa.data.sampling import sample_points
 from caoa.data.pairs import Pair
 from caoa.geometry import yaw_matrix
 

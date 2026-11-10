@@ -1,17 +1,14 @@
-"""Legacy CAPCM (point completion) evaluation, E9 in docs/PLAN.md.
+"""CAPCM (point completion) evaluation: ODGNet's metrics (`utils/metrics.py`) and its runner's aggregation.
 
-Ports ODGNet's `utils/metrics.py` (`Metrics`) and the aggregation in
-`tools/runner.py`:
-
-* per sample (batch size 1, as the legacy val/test loaders ran):
+* per sample (batch size 1):
   F-Score at 0.01 (Euclidean NN distances, strict <), CDL1 x 1000 and
   CDL2 x 1000 with `ignore_zeros=True`, computed on the dense output vs the GT;
 * `validate()`: overall = mean over categories of per-category means (this
   picked `ckpt-best`);
 * `test()`: overall = (sum of per-sample values + sum of per-category means) /
-  (n_samples + n_categories), the legacy "[TEST] Metrics" line;
-* per-category table: count and means, keyed by taxonomy id.
-Addition (labelled): `per_sample_mean`, the plain mean over samples.
+  (n_samples + n_categories), the numbers Table 2 reports;
+* per-category table: count and means, keyed by taxonomy id;
+* `per_sample_mean`: the plain mean over samples.
 """
 
 from collections import defaultdict
@@ -49,7 +46,7 @@ def sample_metrics(pred: torch.Tensor, gt: torch.Tensor) -> list[float]:
 
 
 class CompletionEvaluator:
-    """Accumulates per-sample metrics by taxonomy id and reports the legacy aggregates."""
+    """Accumulates per-sample metrics by taxonomy id and reports the aggregates above."""
 
     def __init__(self):
         self.per_sample: list[list[float]] = []

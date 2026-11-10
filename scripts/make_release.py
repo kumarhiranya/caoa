@@ -1,19 +1,20 @@
-"""P12 release (user, 2026-11-05/06): this project's own models only, no legacy results, code or checkpoints.
+"""Package every trained model of this codebase, with its config and results, into one release folder.
 
-    uv run python scripts/make_release.py [--dst "<caoa_data>/release_v1"] [--seed-runs]
+    uv run python scripts/make_release.py [--dst "<caoa_data>/release_v1"]
 
-Copies, with the configs and results that produced them:
-* `capcm/`: our concat CAPCM retrain (P7 extension, `outputs/legacy_concat`, ckpt-best; "legacy" in that run name is the
-  recipe it reproduces, the weights are ours);
-* `sem/`: our SEM retrain with the BatchNorm recalibration fix (P9, `outputs/sem_cad_bbox/model_recalibrated.pth`);
-* `ocam/`: the release OCAM (P10b final model on our CAPCM + SEM inputs, `outputs/ours_siamunshared_…`); with
-  `--seed-runs` also seeds 778 / 779 under `ocam/seeds/`;
-* `retrieval/`: the release CAD retrieval embedding (`outputs/ours_embed_comp_inst`) and its ShapeNetV2 database
-  embeddings (`db_embeddings.npz`: keys, catids, embeddings; computed here on the GPU, ~1 minute), so inference needs the
-  ShapeNet meshes but not the 1.2 GiB point cache;
+Layout (`release.md` in the folder repeats it):
+* `capcm/<s2cc | concat | s2cc_context100>/`: the completion models of Table 2 (`ckpt-best.pth`, `config.yaml`,
+  `test_results.json`, `train_log.json`); `concat` is the pipeline's;
+* `sem/`: the symmetry embedding module (`model.pth`, BatchNorm-recalibrated) and its validation results;
+* `ocam/<variant>/seed<777 | 778 | 779>/`: every alignment model (`model_final.pth`, `config.yaml`, `results.json`,
+  `train_log.json`); `final` is the pipeline's, the others are the ablation and the paper Table 1 baselines;
+* `retrieval/`: the CAD retrieval embedding and its ShapeNetV2 database embeddings (`db_embeddings.npz`: keys, catids,
+  embeddings; computed here on the GPU), so inference needs the ShapeNet meshes but not the point cache;
+* `results/`: the evaluation outputs behind docs/RESULTS.md (re-ranking on GT instances, the full pipeline on
+  SoftGroup / SphericalMask instances), JSON;
 * `class_synsets.json`: per ScanNet class, the synsets class-mapped retrieval searches (from the train pairs).
-The configs are rewritten so their `checkpoint` entries point into the release (relative to it). `manifest.json` lists
-every file with its size and SHA-256, the source path and the git commit. `scripts/align_scene.py` runs the release.
+Configs are rewritten so their `checkpoint` entries point into the release (relative to it). `manifest.json` lists every
+file with its size, SHA-256 and source, and the git commit. `scripts/align_scene.py` and `caoa.inference.Release` run it.
 """
 
 import argparse
@@ -35,9 +36,29 @@ from caoa.retrieval import pipeline, search
 from caoa.retrieval.model import CADRetrieval
 
 OUT = REPO_ROOT / "outputs"
-POSE = "ours_siamunshared_world_comp_concat_only_emb1024"
-RETRIEVAL = "ours_embed_comp_inst"
-CAPCM_RUN, SEM_WEIGHTS = "legacy_concat", "sem_cad_bbox/model_recalibrated.pth"
+CAPCM = {"s2cc": "capcm_s2cc", "concat": "capcm_concat", "s2cc_context100": "capcm_s2cc_context100"}
+PIPELINE_CAPCM = "concat"
+OCAM = ("final", "baseline", "sem", "siamese_shared", "paper_loss", "paper_schedule", "no_completion")
+SEEDS = (777, 778, 779)
+RETRIEVAL = "retrieval"
+SEM = "sem"
+RELEASE_MD = """# CAOA release
+
+Trained models of the CAOA codebase, with their configs and results (`manifest.json`: files, SHA-256, sources).
+
+| Folder | Contents |
+|---|---|
+| `capcm/<s2cc, concat, s2cc_context100>/` | completion models (paper Table 2); `concat` is the pipeline's |
+| `sem/` | symmetry embedding module (BatchNorm-recalibrated) |
+| `ocam/final/seed<777, 778, 779>/` | the alignment model of the pipeline (Siamese, separate trunks, + SEM) |
+| `ocam/<baseline, sem, siamese_shared, paper_loss, paper_schedule>/seed*/` | the OCAM design ablation |
+| `ocam/no_completion/seed*/` | the paper Table 1 "No-completion" model (`baseline` is "CAPCM", no SEM) |
+| `retrieval/` | CAD retrieval embedding + ShapeNetV2 database embeddings |
+| `results/` | evaluation outputs behind docs/RESULTS.md |
+| `class_synsets.json` | per ScanNet class, the CAD synsets class-mapped retrieval searches |
+
+Run on a scan: `scripts/align_scene.py --release <this folder> ...` (see the repository README).
+"""
 
 
 def sha256(path) -> str:
@@ -48,15 +69,20 @@ def sha256(path) -> str:
     return h.hexdigest()
 
 
+def release_paths(cfg: dict) -> dict:
+    """A run config with its `checkpoint` entries pointing into the release."""
+    if cfg.get("model", {}).get("sym_embedding"):
+        cfg["model"]["sym_embedding"]["checkpoint"] = "sem/model.pth"
+    if cfg.get("data", {}).get("completion"):
+        cfg["data"]["completion"]["checkpoint"] = f"capcm/{PIPELINE_CAPCM}"
+    return cfg
+
+
 def main():
     paths = load_paths()
     parser = argparse.ArgumentParser()
     parser.add_argument("--dst", default=str(paths.cache.parent / "release_v1"))
-    parser.add_argument("--pose", default=POSE, help="OCAM run (default: the release OCAM); others only for testing")
-    parser.add_argument("--retrieval", default=RETRIEVAL)
-    parser.add_argument("--seed-runs", action="store_true", help="also copy the release OCAM seeds 778 / 779")
     args = parser.parse_args()
-    POSE_RUN, RET_RUN = args.pose, args.retrieval
     dst = Path(args.dst)
     if dst.exists() and any(dst.iterdir()):
         raise SystemExit(f"{dst} exists and is not empty; remove it first")
@@ -66,54 +92,53 @@ def main():
     def copy(src, rel):
         (dst / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst / rel)
-        sources[rel] = str(src.relative_to(REPO_ROOT))
+        sources[rel] = str(Path(src).relative_to(REPO_ROOT))
 
-    def write(rel, text):
+    def write(rel, text, source="generated by scripts/make_release.py"):
         (dst / rel).parent.mkdir(parents=True, exist_ok=True)
         (dst / rel).write_text(text)
-        sources[rel] = "generated by scripts/make_release.py"
+        sources[rel] = source
 
-    # CAPCM
-    copy(OUT / CAPCM_RUN / "ckpt-best.pth", "capcm/ckpt-best.pth")
-    copy(OUT / CAPCM_RUN / "config.yaml", "capcm/config.yaml")
-    copy(OUT / CAPCM_RUN / "test_results.json", "capcm/test_results.json")
-    # SEM
-    copy(OUT / SEM_WEIGHTS, "sem/model.pth")
-    copy(OUT / "sem_cad_bbox" / "results_eval_only.json", "sem/results.json")
-    # OCAM (config checkpoints -> release paths)
-    pcfg = yaml.safe_load((OUT / POSE_RUN / "config.yaml").read_text())
-    pcfg["model"]["sym_embedding"]["checkpoint"] = "sem/model.pth"
-    pcfg["data"]["completion"]["checkpoint"] = "capcm"
-    write("ocam/config.yaml", yaml.safe_dump(pcfg, sort_keys=False))
-    copy(OUT / POSE_RUN / "model_final.pth", "ocam/model_final.pth")
-    copy(OUT / POSE_RUN / "results.json", "ocam/results.json")
-    if args.seed_runs:
-        for s in (778, 779):
-            run = f"{POSE_RUN}_seed{s}"
-            copy(OUT / run / "model_final.pth", f"ocam/seeds/{s}/model_final.pth")
-            copy(OUT / run / "results.json", f"ocam/seeds/{s}/results.json")
-    # retrieval
-    rcfg = yaml.safe_load((OUT / RET_RUN / "config.yaml").read_text())
-    rcfg["data"]["completion"]["checkpoint"] = "capcm"
-    write("retrieval/config.yaml", yaml.safe_dump(rcfg, sort_keys=False))
-    copy(OUT / RET_RUN / "model_final.pth", "retrieval/model_final.pth")
-    copy(OUT / RET_RUN / "results.json", "retrieval/results.json")
+    for folder, run in CAPCM.items():
+        for f in ("ckpt-best.pth", "config.yaml", "test_results.json", "train_log.json"):
+            copy(OUT / run / f, f"capcm/{folder}/{f}")
+    copy(OUT / SEM / "model_recalibrated.pth", "sem/model.pth")
+    for f in ("results.json", "results_eval_only.json", "train_log.json"):
+        if (OUT / SEM / f).exists():
+            copy(OUT / SEM / f, f"sem/{f}")
+    for variant in OCAM:
+        for seed in SEEDS:
+            run = f"ocam_{variant}" + ("" if seed == 777 else f"_seed{seed}")
+            rel = f"ocam/{variant}/seed{seed}"
+            cfg = release_paths(yaml.safe_load((OUT / run / "config.yaml").read_text()))
+            write(f"{rel}/config.yaml", yaml.safe_dump(cfg, sort_keys=False), f"outputs/{run}/config.yaml, checkpoints into the release")
+            for f in ("model_final.pth", "results.json", "train_log.json"):
+                copy(OUT / run / f, f"{rel}/{f}")
+
+    rcfg = release_paths(yaml.safe_load((OUT / RETRIEVAL / "config.yaml").read_text()))
+    write("retrieval/config.yaml", yaml.safe_dump(rcfg, sort_keys=False), f"outputs/{RETRIEVAL}/config.yaml, checkpoints into the release")
+    for f in ("model_final.pth", "results.json", "train_log.json"):
+        copy(OUT / RETRIEVAL / f, f"retrieval/{f}")
     device = torch.device("cuda")
     rmodel = CADRetrieval(**rcfg["model"]).to(device)
-    rmodel.load_state_dict(torch.load(OUT / RET_RUN / "model_final.pth", map_location=device)["model"])
+    rmodel.load_state_dict(torch.load(OUT / RETRIEVAL / "model_final.pth", map_location=device)["model"])
     db = load_shapenet_points(paths.cache)
     with torch.no_grad():
         emb = search.embed_points(rmodel.cad, torch.from_numpy(db["points"]), device).cpu().numpy().astype(np.float32)
     np.savez(dst / "retrieval/db_embeddings.npz", keys=np.asarray(db["keys"]), catids=np.asarray(db["catids"]), embeddings=emb)
     sources["retrieval/db_embeddings.npz"] = f"generated: retrieval/model_final.pth on {len(emb)} ShapeNetV2 models"
-    # class-mapped retrieval
-    write("class_synsets.json", json.dumps(pipeline.class_synsets(load_pairs(paths.cache, "train", class_rule=pcfg["data"]["class_rule"])), indent=1))
+
+    for d in sorted(OUT.glob("rerank_*")) + sorted(OUT.glob("pipeline_*")):
+        for f in ("results.json", "matching.json"):
+            if (d / f).exists():
+                copy(d / f, f"results/{d.name}/{f}")
+    write("class_synsets.json", json.dumps(pipeline.class_synsets(load_pairs(paths.cache, "train")), indent=1))
+    write("release.md", RELEASE_MD)
 
     commit = subprocess.run(["git", "rev-parse", "HEAD"], capture_output=True, text=True, cwd=REPO_ROOT).stdout.strip()
     files = {rel: {"bytes": (dst / rel).stat().st_size, "sha256": sha256(dst / rel), "source": src} for rel, src in sorted(sources.items())}
     manifest = {"release": dst.name, "date": str(datetime.date.today()), "git_commit": commit,
-                "note": "CAOA reproduction: this project's own models only (no legacy checkpoints). Run with scripts/align_scene.py.",
-                "files": files}
+                "note": "CAOA: trained models with configs and results. Run with scripts/align_scene.py.", "files": files}
     (dst / "manifest.json").write_text(json.dumps(manifest, indent=1))
     total = sum(f["bytes"] for f in files.values()) / 2**20
     print(f"{len(files)} files, {total:.0f} MiB -> {dst}")

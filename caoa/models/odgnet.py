@@ -1,14 +1,11 @@
-"""CAPCM completion network: ODGNet's `UpTrans` (legacy fork in ODGNet/models), ported.
+"""CAPCM completion network: ODGNet's `UpTrans`, ported.
 
-Ported from `ODGNet/models/UpTrans.py` and the parts of `ODGNet/models/pointnet.py`
-it uses (original code by Pingping Cai). The source of `UpTrans.py` is
-bytecode-identical to what the legacy Python 3.8 environment ran. Module and
-attribute names are unchanged so legacy checkpoints load with `strict=True`;
-the CUDA ops are replaced by `caoa.models.pointops` / `caoa.models.chamfer`.
+Ported from `ODGNet/models/UpTrans.py` and the parts of `ODGNet/models/pointnet.py` it uses (original code by
+Pingping Cai). Module and attribute names are unchanged, so ODGNet checkpoints load with `strict=True`; the CUDA ops
+are replaced by `caoa.models.pointops` / `caoa.models.chamfer`.
 
-Input: (B, N, 3) points, optionally with per-point features (B, N, F) such as
-the context flag (`in_channels` = 3 + F). Output: (Pc, P3, P1, P2, cons1, cons2)
-as in the legacy model; P3 is the final completion (num_pred points).
+Input: (B, N, 3) points, optionally with per-point features (B, N, F) such as the context flag (`in_channels` = 3 + F).
+Output: (Pc, P3, P1, P2, cons1, cons2); P3 is the final completion (num_pred points).
 """
 
 import math
@@ -382,7 +379,7 @@ class UpTrans(nn.Module):
 
     @classmethod
     def from_config(cls, model_cfg: dict):
-        """From the `model:` section of a legacy ODGNet run config."""
+        """From the `model:` section of a CAPCM config."""
         return cls(**{k: v for k, v in model_cfg.items() if k != "NAME"})
 
     def get_loss(self, ret, gt):
@@ -407,8 +404,8 @@ class UpTrans(nn.Module):
         return pcd, p3, p1, p2, cons1, cons2
 
 
-def load_legacy_checkpoint(model: nn.Module, path, strict: bool = True) -> dict:
-    """Load an ODGNet `ckpt-*.pth` as legacy `tools/builder.py:load_model` did (strip "module.").
+def load_checkpoint(model: nn.Module, path, strict: bool = True) -> dict:
+    """Load a CAPCM `ckpt-*.pth` (ODGNet's format; a "module." prefix is stripped).
 
     Returns the checkpoint's bookkeeping: epoch, metrics, best_metrics.
     """

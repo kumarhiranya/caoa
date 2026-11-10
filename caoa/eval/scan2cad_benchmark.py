@@ -1,7 +1,6 @@
 """The official Scan2CAD alignment benchmark, reproduced as-is.
 
-Port of `Routines/Script/EvaluateBenchmark.py` from skanti/Scan2CAD (the copy
-in the legacy repo is identical to upstream), with CSV/JSON file handling
+Port of `Routines/Script/EvaluateBenchmark.py` from skanti/Scan2CAD, with CSV/JSON file handling
 replaced by in-memory inputs. Known quirks are kept on purpose; see
 the module-level notes below and `tests/test_scan2cad_benchmark.py`.
 

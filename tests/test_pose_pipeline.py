@@ -16,7 +16,7 @@ needs_pairs = pytest.mark.skipif(not cache_dir(PATHS.cache).exists(), reason="ru
 
 @pytest.fixture(scope="module")
 def val_pairs():
-    return load_pairs(PATHS.cache, "val", class_rule="relpose_cache")
+    return load_pairs(PATHS.cache, "val")
 
 
 @needs_cuda
@@ -74,8 +74,8 @@ def test_ground_truth_predictions_score_perfectly(val_pairs):
     res = pose_eval.evaluate(
         pairs, target, target, batch["norm_scale"].numpy(), batch["norm_offset"].numpy(), scan2cad.load_annotations(PATHS.s2c_annotations)
     )
-    assert res["legacy"]["scannet_class"]["avg"]["total_acc"] == 1.0
-    assert res["legacy"]["table1"]["per_class"]["total"]["micro_avg"] == 1.0
+    assert res["caoa"]["scannet_class"]["avg"]["total_acc"] == 1.0
+    assert res["caoa"]["table1"]["per_class"]["total"]["micro_avg"] == 1.0
     assert res["s2c_criteria/minus_center"]["instance_mean"] == 1.0
     assert res["s2c_criteria/minus_center"]["class_mean"] == 1.0
     assert res["s2c_box"]["instance_mean"] == 1.0
@@ -95,23 +95,29 @@ def test_model_forward_backward(val_pairs):
     assert all(p.grad is not None for p in model.parameters() if p.requires_grad)
 
 
-SYM_MODEL = "S2Csym_emb128_bce_vox1cm_wd1e-03_b64_lr1e-04_bbcls-ptv3-v1m1-0-shapenet_v2_mini_ptv3cls_softmax_symbinary_cad_bce_adam_cosineannealing"
-SYM_PATH = PATHS.legacy_repo / "data/s2c_symmetry" / SYM_MODEL / "embeddings.npy"
-needs_sym = pytest.mark.skipif(not SYM_PATH.exists(), reason="legacy SEM embeddings missing")
+SYM_MODEL = "sem"
+
+
+def _sym_path():
+    from caoa.data.pose_dataset import sem_embedding_path
+
+    return sem_embedding_path(PATHS, SYM_MODEL)
+
+
+needs_sym = pytest.mark.skipif(not _sym_path().exists(), reason="SEM embeddings missing (scripts/build_sem_embeddings.py)")
 
 
 @needs_pairs
-@pytest.mark.parametrize("frame", ["legacy_export", "cad_bbox"])
-def test_sym_embeddings_cover_every_pair(frame):
-    """P10a: legacy looks up `sym_map[catid_idcad][1]` for every pose pair, so every CAD needs an embedding."""
-    from caoa.data.pose_dataset import load_sym_embeddings, sem_embedding_path
+def test_sym_embeddings_cover_every_pair():
+    """Every pair's CAD needs a SEM embedding (`catid_idcad`)."""
+    from caoa.data.pose_dataset import load_sym_embeddings
 
-    path = sem_embedding_path(PATHS, SYM_MODEL, frame)
+    path = _sym_path()
     if not path.exists():
         pytest.skip(f"{path} missing (scripts/build_sem_embeddings.py)")
     emb = load_sym_embeddings(path)
     assert {e.shape for e in emb.values()} == {(128,)}
-    pairs = load_pairs(PATHS.cache, class_rule="relpose_cache")
+    pairs = load_pairs(PATHS.cache)
     assert all(f"{p.catid_cad}_{p.id_cad}" in emb for p in pairs)
 
 
@@ -119,11 +125,11 @@ def test_sym_embeddings_cover_every_pair(frame):
 @needs_pairs
 @needs_sym
 def test_model_with_sym_embedding(val_pairs):
-    """Legacy "mnkpv3_emb": the embedding is concatenated to the pooled feature, so the heads see it."""
+    """The SEM embedding is concatenated to the pooled feature, so the heads see it."""
     from caoa.data.pose_dataset import load_sym_embeddings
     from caoa.models.ocam import OCAMObjectOnly
 
-    emb = load_sym_embeddings(SYM_PATH)
+    emb = load_sym_embeddings(_sym_path())
     ds = ObjectPoseDataset(val_pairs[:8], train=False, sym_embeddings=emb)
     batch = collate([ds[i] for i in range(len(ds))])
     p = val_pairs[3]
@@ -158,7 +164,7 @@ def _fake_cad_points(pairs, n=4096, seed=0):
 
 @needs_pairs
 def test_chamfer_box_points_follow_the_target(val_pairs):
-    """P10c: unit-box CAD points placed by the GT box pose give the GT box (test frame: metres x norm_scale - offset),
+    """Unit-box CAD points placed by the GT box pose give the GT box (test frame: metres x norm_scale - offset),
     and the Chamfer pose loss is zero at the GT pose and grows with a pose error."""
     from caoa.models.pose_losses import box_points, chamfer_pose_loss
 
@@ -183,7 +189,7 @@ def test_chamfer_box_points_follow_the_target(val_pairs):
 @needs_pairs
 @pytest.mark.parametrize("shared", [True, False])
 def test_siamese_forward_backward(val_pairs, shared):
-    """P10b: shared = one trunk (paper); unshared = two trunks, each with its own conv4 (legacy RelPose, bug fixed)."""
+    """shared = one trunk (the paper's); unshared = two trunks, each with its own conv4."""
     from caoa.models.ocam import OCAMSiamese
 
     pairs = val_pairs[:4]
@@ -206,9 +212,9 @@ def test_siamese_forward_backward(val_pairs, shared):
 @needs_pairs
 @pytest.mark.parametrize("shared", [True, False])
 def test_siamese_overfits_32_samples(val_pairs, shared):
-    """P10 gate: the Siamese OCAM with the paper's loss (t2 / r3 / s2 L1 + 5 x Chamfer) fits 32 fixed samples
-    (legacy metric ~100%; >= 90% after 800 steps, a margin over spconv's run-to-run GPU nondeterminism)."""
-    from caoa.eval import legacy_report
+    """The Siamese OCAM with the paper's loss (t2 / r3 / s2 L1 + 5 x Chamfer) fits 32 fixed samples (CAOA metric
+    ~100%; >= 90% after 800 steps, a margin over spconv's run-to-run GPU nondeterminism)."""
+    from caoa.eval import caoa_metric
     from caoa.models.ocam import OCAMSiamese
     from caoa.models.pose_losses import chamfer_pose_loss
 
@@ -231,5 +237,5 @@ def test_siamese_overfits_32_samples(val_pairs, shared):
     model.eval()
     with torch.no_grad():
         pred = model(*inputs).cpu().numpy()
-    report = legacy_report.eval_pose_report(pred, batch["target"].numpy(), [p.sym for p in pairs], [p.sem_name for p in pairs])
+    report = caoa_metric.eval_pose_report(pred, batch["target"].numpy(), [p.sym for p in pairs], [p.sem_name for p in pairs])
     assert report["avg"]["total_acc"] >= 0.9, report["avg"]["total_acc"]

@@ -1,4 +1,4 @@
-"""S2C box criteria: Scan2CAD's per-object criteria applied to the oriented box instead of the CAD (user, 2026-11-03).
+"""S2C box criteria: Scan2CAD's per-object criteria applied to the oriented box instead of the CAD.
 
 A CAD-independent variant of `s2c_criteria`, reported next to it (the existing criteria are unchanged and stay the
 reference against the GT CAD). The predicted box (centre, rotation, full extents) and the GT box are both mapped to
@@ -11,7 +11,7 @@ thresholds (`scan2cad_benchmark`):
 Relation to `s2c_criteria/minus_center` with the GT CAD: rotation and scale are the same tests (the CAD scale ratio is the
 box-extent ratio), but the benchmark's translation is that of T @ R @ S @ T(-center), a point that sits 2 R S center
 from the box centre; rotation and scale errors move it whenever the CAD's bbox centre is off its origin. So the two
-agree exactly only for CADs centred on their origin (checked numerically 2026-11-03) and otherwise differ by a few
+agree exactly only for CADs centred on their origin and otherwise differ by a few
 points either way. With a retrieved CAD the box variant measures the alignment alone: the CAD's native proportions
 and origin, which Scan2CAD's criteria compare, no longer matter.
 """

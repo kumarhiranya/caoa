@@ -1,6 +1,6 @@
 """Pure-PyTorch versions of the `pointnet2_ops` CUDA ops that ODGNet uses.
 
-Semantics follow `ODGNet/extensions/pointnet2_ops_lib` (the build the legacy runs used):
+Semantics follow `ODGNet/extensions/pointnet2_ops_lib`:
 
 * `furthest_point_sample` starts at index 0 and, like the CUDA kernel, never
   selects a point whose squared norm is <= 1e-3 (`if (mag <= 1e-3) continue;`).

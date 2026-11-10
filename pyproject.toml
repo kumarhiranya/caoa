@@ -1,7 +1,7 @@
 [project]
 name = "caoa"
 version = "0.1.0"
-description = "Clean re-implementation of CAOA: Completion-Assisted Object-CAD Alignment (arXiv 2606.18429)"
+description = "CAOA: Completion-Assisted Object-CAD Alignment (arXiv 2606.18429): completion, symmetry embedding, CAD retrieval and alignment"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "numpy>=2.0",
@@ -15,9 +15,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
-    # Only used by tests/legacy_ref.py to run verbatim copies of the legacy code.
-    "numpy-quaternion>=2024.0",
-    "scikit-learn>=1.5",  # legacy eval_pose_s2c_v2 / eval_sym use sklearn.metrics
+    "numpy-quaternion>=2024.0",  # tests: the upstream Scan2CAD benchmark script and a rotation-projection check
 ]
 
 [build-system]
@@ -37,6 +35,7 @@ train = [
     "spconv-cu126==2.3.8",
     "tensorboard>=2.18",
     "addict>=2.4",
+    "scikit-learn>=1.5",  # SEM training: macro-F1
 ]
 notebook = [  # notebooks/single_scene_pipeline.ipynb
     "plotly>=5.24",

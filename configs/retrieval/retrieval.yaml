@@ -1,0 +1,30 @@
+# CAD retrieval: a joint embedding of scanned objects (CAPCM completion + instance points) and ShapeNetV2 CADs, trained
+# with InfoNCE against the GT CAD (caoa/retrieval/model.py). Stage 1 of the full pipeline; the OCAM re-ranks its top 10.
+name: retrieval
+seed: 0
+
+data:
+  completion: {name: capcm_concat, frame: world, checkpoint: outputs/capcm_concat}  # scripts/build_pose_completions.py
+  num_points: 2048
+  inst_fraction: 0.5  # half of the query's points from the instance, half from the completion
+
+model:
+  embedding: 512  # OCAMEncoder width (pooled feature 2 x 512)
+  out_dim: 256
+  voxel_size: 0.01
+  temperature: 0.07  # initial; learnable
+
+train:
+  batch_size: 64
+  neg_same_category: 4  # per query
+  neg_random: 64
+  max_steps: 10000  # ~96 epochs of 104 steps
+  lr: 1.0e-4
+  weight_decay: 1.0e-4
+  min_lr_ratio: 0.01
+  num_workers: 8
+  stat_freq: 100
+  val_freq: 1000
+
+eval:
+  yaws: [1, 8]  # 8: mean query embedding over 8 yaw rotations

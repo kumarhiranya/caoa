@@ -1,6 +1,6 @@
-"""CAD retrieval database (P11d): 2,048 uniform surface samples for every ShapeNetV2 model (52,491), in the CAD's
+"""CAD retrieval database: 2,048 uniform surface samples for every ShapeNetV2 model (52,491), in the CAD's
 own bounding-box frame (centred, longest side 1; as `build_cad_points.py`). One .npz in `<cache>/shapenet_points_v1/`
-(~1.3 GB, user OK 2026-11-03) with `keys`, `catids`, `points`, `bbox_center`, `bbox_extent`, plus `failed.txt`.
+(~1.3 GB) with `keys`, `catids`, `points`, `bbox_center`, `bbox_extent`, plus `failed.txt`.
 Each model's samples are seeded from its key, so the cache does not depend on the worker count.
 
     uv run python scripts/build_shapenet_points.py --workers 20

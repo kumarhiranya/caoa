@@ -1,17 +1,14 @@
-"""Train / evaluate CAPCM (ODGNet UpTrans), reproducing legacy `ODGNet/tools/runner.py`.
+"""Train / evaluate the CAPCM (ODGNet's UpTrans), with ODGNet's training loop.
 
-    uv run python scripts/train_completion.py configs/completion/legacy_s2cc.yaml [--max-epoch N] [--test-only CKPT]
+    uv run python scripts/train_completion.py configs/capcm/concat.yaml [--max-epoch N] [--test-only CKPT]
 
-Legacy behaviour reproduced:
-* epochs 0..max_epoch inclusive; train loader batch `total_bs`, shuffled, drop_last;
-  val/test loaders batch 1;
+* epochs 0..max_epoch inclusive; train loader batch `total_bs`, shuffled, drop_last; val/test loaders batch 1;
 * loss = UpTrans.get_loss (4 x CD-L1, x 1e3) + orth_weight x (dictionary orthogonality);
-* AdamW; LambdaLR max(lr_decay ** (e / decay_step), lowest_decay) and the BN-momentum
-  scheduler max(bn_momentum * bn_decay ** (e / decay_step), lowest_decay), both stepped
-  with the finished epoch's index;
-* every `val_freq` epochs (not epoch 0): `validate()` (class-averaged); ckpt-best by
-  `consider_metric`; ckpt-last every epoch; per-epoch checkpoints for the last 10;
-* at the end: `test()` aggregation on the test split, with per-category tables.
+* AdamW; LambdaLR max(lr_decay ** (e / decay_step), lowest_decay) and the BN-momentum scheduler
+  max(bn_momentum * bn_decay ** (e / decay_step), lowest_decay), both stepped with the finished epoch's index;
+* every `val_freq` epochs (not epoch 0): `validate()` (class-averaged); ckpt-best by `consider_metric`; ckpt-last
+  every epoch;
+* at the end: the `test()` aggregation on ckpt-best, with per-category tables (`test_results.json`).
 """
 
 import argparse
@@ -27,7 +24,7 @@ from torch.utils.data import ConcatDataset, DataLoader
 from caoa.data.completion_dataset import S2CCompletionDataset, load_completion_samples
 from caoa.data.snindoor_dataset import SNIndoorDataset
 from caoa.eval.completion_metrics import CompletionEvaluator, sample_metrics
-from caoa.models.odgnet import UpTrans, load_legacy_checkpoint
+from caoa.models.odgnet import UpTrans, load_checkpoint
 from caoa.paths import REPO_ROOT, load_paths
 
 LOWER_IS_BETTER = {"CDL1": True, "CDL2": True, "F-Score": False}
@@ -56,7 +53,7 @@ def forward(model, partial):
 
 @torch.no_grad()
 def evaluate(model, loader, device):
-    """Per-sample legacy metrics on the dense output (batch size 1)."""
+    """Per-sample completion metrics on the dense output (batch size 1)."""
     model.eval()
     ev = CompletionEvaluator()
     for catids, _, partial, gt, _, _ in loader:
@@ -76,7 +73,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("config")
     parser.add_argument("--max-epoch", type=int, default=None, help="override, e.g. for a smoke test")
-    parser.add_argument("--test-only", default=None, help="legacy or new checkpoint to evaluate")
+    parser.add_argument("--test-only", default=None, help="checkpoint to evaluate instead of training")
     parser.add_argument("--val-freq", type=int, default=None, help="override, e.g. for a smoke test")
     args = parser.parse_args()
 
@@ -89,12 +86,12 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "config.yaml").write_text(yaml.safe_dump(cfg))
 
-    seed = cfg.get("seed", 2023)  # legacy --seed default
+    seed = cfg.get("seed", 2023)
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
     device = torch.device("cuda")
-    torch.backends.cudnn.benchmark = True  # as legacy (ODGNet main.py:18, train_pose.py)
+    torch.backends.cudnn.benchmark = True
     paths = load_paths()
     sem = np.load(paths.semantic_embeddings, allow_pickle=True).item()
 
@@ -104,12 +101,12 @@ def main():
 
     if not args.test_only:
         train(model, cfg, paths, sem, out_dir, device)
-    ckpt = args.test_only or out_dir / "ckpt-best.pth"  # legacy test() was run on a chosen checkpoint, usually ckpt-best
-    info = load_legacy_checkpoint(model, ckpt)
+    ckpt = args.test_only or out_dir / "ckpt-best.pth"
+    info = load_checkpoint(model, ckpt)
     print(f"testing {ckpt}: epoch {info['epoch']}, stored metrics {info['metrics']}")
     results = evaluate(model, test_loader, device)
     (out_dir / "test_results.json").write_text(json.dumps(results, indent=1))
-    print(f"[TEST] Metrics (legacy test() aggregation) = {results['test']}")
+    print(f"[TEST] Metrics (test() aggregation) = {results['test']}")
     print(f"validate() aggregation = {results['validate']}  | per-sample mean = {results['per_sample_mean']}  (n={results['n_samples']})")
 
 
@@ -139,7 +136,7 @@ def train(model, cfg, paths, sem, out_dir, device):
             loss_pcd, sparse, dense = model.get_loss(ret, gt)
             orth1, orth2 = model.get_constrain(ret)
             (loss_pcd + cfg["loss"]["orth_weight"] * (orth1 + orth2)).backward()
-            optimizer.step()  # step_per_update = 1 in every legacy config
+            optimizer.step()
             model.zero_grad()
             totals += [sparse.item() * 1000, dense.item() * 1000, orth1.item() * 1000, orth2.item() * 1000]
             n += 1
@@ -158,8 +155,6 @@ def train(model, cfg, paths, sem, out_dir, device):
                 torch.save({"base_model": model.state_dict(), "epoch": epoch, "metrics": res["validate"]}, out_dir / "ckpt-best.pth")
             print(f"[Validation] EPOCH {epoch}: {res['validate']}  (best {metric} {best:.4f})", flush=True)
         torch.save({"base_model": model.state_dict(), "epoch": epoch}, out_dir / "ckpt-last.pth")
-        if cfg["max_epoch"] - epoch < 10:
-            torch.save({"base_model": model.state_dict(), "epoch": epoch}, out_dir / f"ckpt-epoch-{epoch:03d}.pth")
         log.append(entry)
         (out_dir / "train_log.json").write_text(json.dumps(log))
 

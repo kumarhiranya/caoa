@@ -6,7 +6,7 @@ backward, gradients flow only through each point's nearest neighbour.
 
 * L2: mean(dist1) + mean(dist2)
 * L1: (mean(sqrt(dist1)) + mean(sqrt(dist2))) / 2
-`ignore_zeros` drops all-zero points, only for batch size 1 (legacy behaviour).
+`ignore_zeros` drops all-zero points, only for batch size 1 (as ODGNet's).
 """
 
 import torch

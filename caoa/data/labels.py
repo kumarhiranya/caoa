@@ -68,7 +68,7 @@ def shapenet_synset_names() -> dict[str, list[str]]:
 
 @cache
 def synset_to_eval_class() -> dict[str, str]:
-    """ShapeNet synset -> first of its names that is an EVAL_CLASSES name (legacy `get_cadid_valid_names`)."""
+    """ShapeNet synset -> first of its names that is an EVAL_CLASSES name."""
     out = {}
     for synset, names in shapenet_synset_names().items():
         match = next((n for n in names if n in EVAL_CLASSES), None)

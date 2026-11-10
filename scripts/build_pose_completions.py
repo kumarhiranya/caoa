@@ -1,11 +1,8 @@
-"""Complete every pose pair with a CAPCM checkpoint, as the legacy pose dataset did (P8).
+"""Complete every object–CAD pair with a CAPCM checkpoint: the OCAM's (and the retrieval's) completion input.
 
-    uv run python scripts/build_pose_completions.py --name odg_s2ccompletion_upTransb1 \
-        --ckpt experiments/UpTrans/S2CCompletion/s2ccompletion_upTransb1/ckpt-best.pth \
-        --config experiments/UpTrans/S2CCompletion/s2ccompletion_upTransb1/config.yaml
+    uv run python scripts/build_pose_completions.py --name capcm_concat --run outputs/capcm_concat
 
-See `caoa/data/pose_completion.py` for what is reproduced (incl. the legacy GT-box-frame input).
-`--frame world` runs the model in the world frame instead (the leak-free fix; cache `<name>__world`).
+The model runs on each instance's world-frame points (`caoa/data/pose_completion.py`); cache `<name>__world`.
 """
 
 import argparse
@@ -18,28 +15,27 @@ from tqdm import tqdm
 
 from caoa.data.pairs import load_pairs
 from caoa.data.pose_completion import COMPLETION_FRAMES, complete_pairs, pose_completion_dir
-from caoa.models.odgnet import UpTrans, load_legacy_checkpoint
-from caoa.paths import load_paths
+from caoa.models.odgnet import UpTrans, load_checkpoint
+from caoa.paths import REPO_ROOT, load_paths
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--name", required=True, help="completion model name, used as the cache folder")
-    parser.add_argument("--ckpt", required=True, help="checkpoint, relative to the legacy ODGNet folder")
-    parser.add_argument("--config", required=True, help="legacy run config (for the model section), relative to ODGNet")
+    parser.add_argument("--run", required=True, help="CAPCM run folder (ckpt-best.pth, config.yaml), relative to the repo or absolute")
     parser.add_argument("--seed", type=int, default=0)
-    parser.add_argument("--frame", choices=COMPLETION_FRAMES, default="legacy", help="frame the model runs in")
+    parser.add_argument("--frame", choices=COMPLETION_FRAMES, default="world")
     args = parser.parse_args()
 
     paths = load_paths()
-    odgnet = paths.legacy_repo / "ODGNet"
+    run = REPO_ROOT / args.run
     device = torch.device("cuda")
-    model = UpTrans.from_config(yaml.safe_load(open(odgnet / args.config))["model"]).to(device).eval()
-    info = load_legacy_checkpoint(model, odgnet / args.ckpt)
-    print(f"{args.name}: {args.ckpt} (epoch {info['epoch']}), frame {args.frame}")
+    model = UpTrans.from_config(yaml.safe_load(open(run / "config.yaml"))["model"]).to(device).eval()
+    info = load_checkpoint(model, run / "ckpt-best.pth")
+    print(f"{args.name}: {run} (epoch {info['epoch']}), frame {args.frame}")
 
     np.random.seed(args.seed)
-    pairs = load_pairs(paths.cache, class_rule="relpose_cache")
+    pairs = load_pairs(paths.cache)
     by_scene = {}
     for p in pairs:
         by_scene.setdefault(p.scene_id, []).append(p)

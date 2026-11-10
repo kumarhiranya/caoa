@@ -1,8 +1,6 @@
-"""CAPCM datasets (P5): parity of the SN-Indoor crop, frames and item formats."""
+"""CAPCM datasets: the SN-Indoor crop, frames and item formats."""
 
-import math
 import random
-import textwrap
 
 import numpy as np
 import pytest
@@ -17,26 +15,15 @@ SEM_EMB = PATHS.semantic_embeddings
 needs_snindoor = pytest.mark.skipif(not (PATHS.shapenet.parent / "ShapeNetV2-augmented").exists(), reason="SN-Indoor partials not available")
 
 
-def legacy_crop():
-    """`SNAugDataset.crop_random_nonlinear`, read verbatim from the legacy file."""
-    src = (PATHS.legacy_repo / "ODGNet/datasets/SNAugDataset.py").read_text().replace("\r", "")
-    start = src.index("    def crop_random_nonlinear(")
-    end = src.index("    def add_gaussian_noise(", start)
-    scope = {"np": np, "random": random, "math": math}
-    exec(textwrap.dedent(src[start:end]), scope)
-    return lambda pts, difficulty: scope["crop_random_nonlinear"](None, pts, difficulty)
-
-
-@pytest.mark.skipif(not (PATHS.legacy_repo / "ODGNet").exists(), reason="legacy ODGNet not found")
 @pytest.mark.parametrize("difficulty", ["easy", "medium", "hard"])
-def test_snindoor_crop_matches_legacy(difficulty):
+def test_snindoor_crop_keeps_a_part_and_is_seeded(difficulty):
     pts = np.random.default_rng(1).uniform(-0.5, 0.5, (3000, 3))
-    for seed in range(5):
-        random.seed(seed)
-        ref = legacy_crop()(pts, difficulty)
-        random.seed(seed)
-        ours = snindoor_dataset.crop_random_nonlinear(pts, difficulty)
-        np.testing.assert_array_equal(ours, ref)
+    random.seed(0)
+    a = snindoor_dataset.crop_random_nonlinear(pts, difficulty)
+    random.seed(0)
+    b = snindoor_dataset.crop_random_nonlinear(pts, difficulty)
+    np.testing.assert_array_equal(a, b)
+    assert 0 < len(a) <= len(pts)
 
 
 @needs_snindoor
@@ -51,8 +38,8 @@ def test_snindoor_items():
 
 @pytest.mark.data
 def test_s2c_completion_frames():
-    """The instance must lie on its CAD in both legacy frames (train: CAD frame; val: normalised world frame)."""
-    pairs = [p for p in load_pairs(PATHS.cache, "val", class_rule="relpose_cache") if keep_for_completion(p.sem_name)][:4]
+    """The instance must lie on its CAD in both frames (train: CAD frame; val: normalised world frame)."""
+    pairs = [p for p in load_pairs(PATHS.cache, "val") if keep_for_completion(p.sem_name)][:4]
     if not all((PATHS.shapenet / p.catid_cad / p.id_cad).exists() for p in pairs):
         pytest.skip("CAD meshes not available")
     np.random.seed(0)

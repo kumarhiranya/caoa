@@ -3,10 +3,8 @@
     uv run python scripts/build_completion_cache.py --radius 0 --estimate 40   # size estimate only
     uv run python scripts/build_completion_cache.py --radius 0 [--jobs 8]      # build
 
-One cache per context radius, as legacy kept one file per radius
-(`scannet_inst_completion_context_spatial{r}cm_{phase}.npy`); each pair's CAD is
-sampled once with `resample_mesh(density=2000)` when its cache entry is built.
-Points are stored as float32 (user decision 2026-10-21; legacy kept float64), ~1.1 GiB.
+One cache per context radius; each pair's CAD is sampled once with `resample_mesh(density=2000)` when its cache
+entry is built. Points are stored as float32, ~1.1 GiB.
 """
 
 import argparse
@@ -27,7 +25,7 @@ from caoa.paths import load_paths
 
 def build_scene(args):
     scene_id, pairs, radius, paths, seed = args
-    np.random.seed(seed)  # resample_mesh uses the global NumPy RNG, as legacy did
+    np.random.seed(seed)  # resample_mesh uses the global NumPy RNG
     world = None
     if radius > 0:
         scene = load_scene(paths.scannet_scans, scene_id)
@@ -36,7 +34,7 @@ def build_scene(args):
     samples = []
     for p in pairs:
         mesh = shapenet.load_cad_mesh(paths.shapenet, p.catid_cad, p.id_cad)
-        ctx = (context.context_points("completion", world, scene.instance, p.instance_id, radius)
+        ctx = (context.context_points(world, scene.instance, p.instance_id, radius)
                if radius > 0 else np.zeros((0, 3)))
         samples.append(CompletionSample(
             scene_id=p.scene_id, model_index=p.model_index, catid_cad=p.catid_cad, id_cad=p.id_cad, sem_name=p.sem_name,
@@ -49,7 +47,7 @@ def build_scene(args):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--radius", type=float, required=True, help="context radius in metres (legacy: 0 or 1)")
+    parser.add_argument("--radius", type=float, required=True, help="context radius in metres (0, or 1 for the context CAPCM)")
     parser.add_argument("--jobs", type=int, default=8)
     parser.add_argument("--estimate", type=int, default=0, help="only build N pairs and extrapolate the cache size")
     parser.add_argument("--seed", type=int, default=0)
@@ -58,7 +56,7 @@ def main():
     args = parser.parse_args()
 
     paths = load_paths()
-    pairs = [p for p in load_pairs(paths.cache, args.split, class_rule="relpose_cache") if keep_for_completion(p.sem_name)]
+    pairs = [p for p in load_pairs(paths.cache, args.split) if keep_for_completion(p.sem_name)]
     by_scene = {}
     for p in pairs:
         by_scene.setdefault(p.scene_id, []).append(p)

@@ -1,18 +1,13 @@
-"""SEM: the PTv3 symmetry classifier (P9), as legacy `train_sym_ptv3.py` built it.
+"""SEM: the symmetry embedding module, a PTv3 classifier of CAD symmetry.
 
-* Backbone: the vendored PTv3 (`caoa.models.ptv3`) with the legacy `cls-ptv3-v1m1-0-shapenet_v2_mini` config
-  (= the run's `model_config.yaml`), except `enable_flash`: flash-attn is not installed, and the non-flash path
-  pads the same patches, so only the attention precision differs (fp16 in flash).
-* Head: legacy `PT3ClassifierSoftmax` (`PointTransformerV3/model_utils.py`): mean over each cloud's points
-  (`segment_csr`), then MLP 128-256-128-2 with BN, ReLU, dropout 0.5 and a softmax. The model outputs
-  probabilities in train and eval mode (legacy trains it with `BCELoss` on them). `emb` is the pooled 128-d
-  feature, the SEM embedding that OCAM consumes (`data/s2c_symmetry/<run>/embeddings.npy`).
-* Input: `coord` = `feat` = the points, clouds concatenated with CSR `offset`. Two legacy pipelines differ:
-  - "train" (`S2CCompletionSymmetry`, data_source cad, which trained the checkpoint): the CAD (5,000 uniform
-    points, tiled to 8,192) in its GT box frame (longest side 1), `grid_coord = coord // voxel_size`;
-  - "export" (`S2CSymmetry`, which `build_dataset_sym.py` used for `embeddings.npy`): raw ShapeNet
-    coordinates, `grid_coord = (coord - coord.min(0)) // voxel_size`. The checkpoint collapses on these inputs
-    (every CAD predicted not symmetric; docs/results/P9.md).
+* Backbone: the vendored PTv3 (`caoa.models.ptv3`) with the `cls-ptv3-v1m1-0-shapenet_v2_mini` configuration, except
+  `enable_flash`: flash-attn is not used; the non-flash path pads the same patches, so only the attention precision
+  differs (fp16 with flash).
+* Head: mean over each cloud's points (`segment_csr`), then an MLP 128-256-128-2 with BN, ReLU, dropout 0.5 and a
+  softmax. The model outputs probabilities in train and eval mode (trained with `BCELoss` on them). `emb` is the
+  pooled 128-d feature, the SEM embedding the OCAM consumes (`scripts/build_sem_embeddings.py`).
+* Input: `coord` = `feat` = the points, clouds concatenated with CSR `offset`: the CAD (5,000 uniform surface points,
+  tiled to 8,192) in its own bounding-box frame (longest side 1), `grid_coord = coord // voxel_size`.
 """
 
 import numpy as np
@@ -24,7 +19,7 @@ from caoa.models.ptv3.model import Point, PointTransformerV3
 
 EMBED_DIM = 128
 VOXEL_SIZE = 0.01
-CLASSES = ("__SYM_NONE", "__SYM")  # legacy task "symbinary": index 0 = not symmetric, 1 = any rotational symmetry
+CLASSES = ("__SYM_NONE", "__SYM")  # index 0 = not symmetric, 1 = any rotational symmetry
 BACKBONE = dict(
     in_channels=3,
     order=("z", "z-trans", "hilbert", "hilbert-trans"),
@@ -46,7 +41,7 @@ BACKBONE = dict(
     shuffle_orders=True,
     pre_norm=True,
     enable_rpe=False,
-    enable_flash=False,  # legacy: True
+    enable_flash=False,  # flash-attn not used
     upcast_attention=False,
     upcast_softmax=False,
     cls_mode=True,
@@ -73,7 +68,7 @@ class SEMClassifier(nn.Module):
             nn.ReLU(inplace=True),
             nn.Dropout(p=0.5),
             nn.Linear(128, num_classes),
-            nn.Softmax(dim=1),  # legacy nn.Softmax() picks dim 1 for 2-D input
+            nn.Softmax(dim=1),
         )
 
     def forward(self, input_dict: dict) -> dict:
@@ -82,18 +77,9 @@ class SEMClassifier(nn.Module):
         return {"probs": self.cls_head(emb), "emb": emb}
 
 
-GRID_MODES = ("train", "export")
-
-
-def make_batch(clouds: list[np.ndarray], device, voxel_size: float = VOXEL_SIZE, grid: str = "export") -> dict:
-    """Legacy `__getitem__` (minus its random point shuffle) + `point_collate_fn`; `grid` picks the pipeline (above)."""
-    if grid not in GRID_MODES:
-        raise ValueError(f"grid {grid!r}; one of {GRID_MODES}")
-    if grid == "export":  # float64, as legacy (numpy input)
-        grids = [torch.div(c - c.min(0)[0], voxel_size, rounding_mode="floor").long()
-                 for c in (torch.as_tensor(np.asarray(c, dtype=np.float64)) for c in clouds)]
-    else:  # float32 tensor, as legacy
-        grids = [torch.div(torch.as_tensor(c, dtype=torch.float32), voxel_size, rounding_mode="floor").long() for c in clouds]
+def make_batch(clouds: list[np.ndarray], device, voxel_size: float = VOXEL_SIZE) -> dict:
+    """A batch of point clouds (each (N, 3), CAD bounding-box frame) as the PTv3 input dict."""
+    grids = [torch.div(torch.as_tensor(c, dtype=torch.float32), voxel_size, rounding_mode="floor").long() for c in clouds]
     coord = torch.cat([torch.as_tensor(c, dtype=torch.float32) for c in clouds]).to(device)
     return {
         "coord": coord,
@@ -103,26 +89,30 @@ def make_batch(clouds: list[np.ndarray], device, voxel_size: float = VOXEL_SIZE,
     }
 
 
-LEGACY_SEM_RUN = ("S2Csym_emb128_bce_vox1cm_wd1e-03_b64_lr1e-04_bbcls-ptv3-v1m1-0-shapenet_v2_mini_ptv3cls_softmax_symbinary"
-                  "_cad_bce_adam_cosineannealing")
+CAD_POINTS, INPUT_POINTS = 5000, 8192
 
 
-def sem_checkpoint(paths, sym_cfg: dict | None = None):
-    """The SEM weights behind a pose config's `sym_embedding`: its `checkpoint` (a plain state_dict, relative to the repo,
-    e.g. our recalibrated retrain `outputs/sem_cad_bbox/model_recalibrated.pth`), else the legacy run `name`."""
-    from pathlib import Path
+def cad_bbox_points(mesh, rng) -> np.ndarray:
+    """The SEM's input for a CAD mesh: 5,000 uniform surface points in its own bounding-box frame (centred, longest side
+    1), tiled to 8,192."""
+    from caoa.data.sampling import sample_points
+    from caoa.data.shapenet import sample_uniform
 
+    pts = sample_uniform(mesh, CAD_POINTS, rng=rng)
+    lo, hi = pts.min(0), pts.max(0)
+    return sample_points((pts - (lo + hi) / 2) / (hi - lo).max(), INPUT_POINTS)
+
+
+def sem_checkpoint(sym_cfg: dict):
+    """The SEM weights behind a pose config's `sym_embedding`: its `checkpoint` (a plain state_dict), relative to the
+    repository root or absolute."""
     from caoa.paths import REPO_ROOT
 
-    sym_cfg = sym_cfg or {}
-    if sym_cfg.get("checkpoint"):
-        return REPO_ROOT / sym_cfg["checkpoint"]
-    run = sym_cfg.get("name", LEGACY_SEM_RUN)
-    return Path(paths.legacy_repo) / "checkpoints/symmetry_ptv3" / run / f"{run}.pth"
+    return REPO_ROOT / sym_cfg["checkpoint"]
 
 
-def load_legacy_sem(model: SEMClassifier, path) -> None:
-    """Legacy checkpoints are a plain `state_dict` (`torch.save(model.state_dict())`)."""
+def load_sem(model: SEMClassifier, path) -> None:
+    """SEM checkpoints are a plain `state_dict`."""
     model.load_state_dict(torch.load(path, map_location="cpu", weights_only=False), strict=True)
 
 
@@ -131,10 +121,10 @@ BN_RECALIBRATION = ("none", "train")
 
 @torch.no_grad()
 def recalibrate_batchnorm(model: nn.Module, batches) -> None:
-    """Fix (P9, user 2026-11-03; switch `bn_recalibration: train`): recompute every BatchNorm's running statistics as the
-    plain average over `batches` (input dicts), with everything else in eval mode (no dropout, no drop-path, fixed
-    serialization orders), so they match the activations eval mode produces. Legacy keeps the statistics from training,
-    which were accumulated with drop-path on; a SEM trained on CAD-frame inputs then fails in eval mode (docs/results/P9.md)."""
+    """Recompute every BatchNorm's running statistics as the plain average over `batches` (input dicts), with everything
+    else in eval mode (no dropout, no drop-path, fixed serialization orders), so they match the activations eval mode
+    produces. The statistics kept from training were accumulated with drop-path on, and with them the SEM collapses in
+    eval mode (66% accuracy instead of 98%)."""
     model.eval()
     bns = [m for m in model.modules() if isinstance(m, nn.modules.batchnorm._BatchNorm)]
     momenta = [m.momentum for m in bns]
