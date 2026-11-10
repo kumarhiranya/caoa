@@ -1,7 +1,7 @@
 """SphericalMask inference on ScanNet val, saving per-scene predictions in SoftGroup's file layout.
 
 Runs in SphericalMask's own environment (not this project's): the upstream repo, venv, data and checkpoint live in
-their own folder (setup: docs/sphericalmask.md). Mirrors upstream
+their own folder (setup: docs/instance_predictions.md). Mirrors upstream
 `tools/test.py` (model, dataset, loader, `ScanNetEval`; the checkpoint is loaded strictly after one key rename, see below; the AP printout is the sanity check against
 the published 62.6 AP / 81.9 AP50 on val) and additionally writes `<out>/<scene>_sg_preds.npz` = {"arr_0": {"scan_id",
 "pred_instances", "semantic_preds"}}, the format `caoa.data.instances` reads (`pred_instances`: run-length masks over the

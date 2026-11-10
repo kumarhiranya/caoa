@@ -14,20 +14,61 @@ An implementation of *CAOA* (arXiv 2606.18429): align a CAD model to each object
 
 ## Setup
 
+### 1. Code
+
 ```bash
-uv sync --extra train          # Python 3.12, torch 2.9.1 + cu126, spconv-cu126
-cp configs/paths.yaml configs/paths.local.yaml   # then edit the data locations
+uv sync --extra train          # Python 3.12, torch 2.9.1 + cu126, spconv-cu126 (add --extra notebook for the notebook)
 uv run pytest -q               # unit tests; the data-dependent ones skip without the data
 ```
 
-Data (locations in `configs/paths.local.yaml`):
-- ScanNet v2 scans;
-- ShapeNetCore v2, with the SN-Indoor partial scans (`ShapeNetV2-augmented`) for CAPCM training;
-- the Scan2CAD-Completion (S2C-C) annotations and CAD splits;
-- Scan2CAD's benchmark files;
-- per-CAD semantic embeddings;
-- instance predictions for the ScanNet val scans, from SoftGroup or SphericalMask. SphericalMask setup:
-  [`docs/sphericalmask.md`](docs/sphericalmask.md).
+### 2. Downloads from this project
+
+Extract each archive in the repository root. They land where the default `configs/paths.yaml` expects them.
+
+| Archive | Size | Contents |
+|---|---|---|
+| `caoa_models_v1.tar.zst` | 3.3 GB | `release_v1/`: every trained model with config and results: 3 CAPCMs, SEM, 7 OCAM variants × 3 seeds, retrieval + ShapeNetV2 database embeddings |
+| `caoa_models_v1_pipeline.tar.zst` | 364 MB | only the models the pipeline runs (CAPCM concat, SEM, final OCAM seed 777, retrieval); enough for `align_scene.py` and the notebook |
+| `caoa_data_v1.tar.zst` | 134 MB | `data/`: S2C-C instance ids, CAD splits, semantic embeddings, SoftGroup and SphericalMask predictions on the ScanNet val scans; `cache/`: SEM embeddings |
+
+```bash
+tar -I zstd -xf caoa_models_v1.tar.zst      # -> release_v1/
+tar -I zstd -xf caoa_data_v1.tar.zst        # -> data/, cache/
+uv run python scripts/unpack_release.py     # links the models into outputs/ under the run names the scripts use
+```
+
+The archives contain no ScanNet, ShapeNet or Scan2CAD data, as those datasets' terms don't allow redistribution. The
+data built from them is generated locally in step 4.
+
+### 3. Datasets (download them yourself, under their terms)
+
+| Dataset | Where | Put it at (default paths) | Needed for |
+|---|---|---|---|
+| ScanNet v2 | scan-net.org (terms of use form) | `data/scannet/scans/<scene>/`: `<scene>_vh_clean_2.ply`, `_vh_clean_2.0.010000.segs.json`, `.aggregation.json` of the 1,506 Scan2CAD scenes | everything |
+| ShapeNetCore v2 | shapenet.org | `data/ShapeNetV2/` | everything (CAD meshes, retrieval database) |
+| Scan2CAD annotations | github.com/skanti/Scan2CAD (form) | `data/scan2cad/full_annotations.json`, `cad_appearances.json` | everything |
+| SN-Indoor partial scans | ShapeNetV2-augmented with `aug_train_test_splits.pkl` | `data/ShapeNetV2-augmented/`, split file in `data/ShapeNetV2/` | CAPCM training only |
+
+Paths can be changed in `configs/paths.local.yaml` (copy of `configs/paths.yaml`).
+
+### 4. Build the derived data
+
+```bash
+# S2C-C annotations = Scan2CAD's + the ScanNet instance of each aligned model (from the data archive)
+uv run python scripts/build_s2cc_annotations.py --scan2cad data/scan2cad/full_annotations.json \
+    --instance-ids data/s2cc/s2cc_instance_ids.json --out data/s2cc/scan2cad_v2_completion_annotations.json
+uv run python scripts/build_pairs.py                         # object–CAD pairs from ScanNet (~550 MB)
+uv run python scripts/build_cad_points.py                    # CAD points for the Siamese OCAM (~290 MB)
+uv run python scripts/build_shapenet_points.py               # ShapeNetV2 retrieval database (~1.3 GB)
+uv run python scripts/build_pose_completions.py --name capcm_concat --run outputs/capcm_concat   # GPU (~800 MB)
+# only for Table 2 (completion) and CAPCM training:
+uv run python scripts/build_completion_cache.py --radius 0   # ~2.0 GB
+uv run python scripts/build_completion_cache.py --radius 1   # ~2.8 GB
+```
+
+Then reproduce the results with the evaluation commands below. `scripts/report.py` regenerates every table from the
+released results straight away. Instance predictions can also be made from scratch:
+[`docs/instance_predictions.md`](docs/instance_predictions.md).
 
 ## Using the release
 
@@ -86,6 +127,7 @@ uv run python scripts/train_pose.py configs/ocam/final.yaml [--seed 778]        
 uv run python scripts/train_retrieval.py configs/retrieval/retrieval.yaml         # CAD retrieval
 
 # evaluation
+uv run python scripts/train_pose.py configs/ocam/final.yaml --eval-only outputs/ocam_final/model_final.pth   # an OCAM on GT instances
 uv run python scripts/rerank_retrieval.py                                         # retrieval + re-ranking, GT instances
 uv run python scripts/run_pipeline.py --instances sphericalmask [--pose ocam_final]   # full pipeline (also softgroup)
 uv run python scripts/run_pipeline.py --instances softgroup --tag _common --restrict-to outputs/pipeline_sphericalmask__ocam_final

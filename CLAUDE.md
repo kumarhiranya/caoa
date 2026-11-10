@@ -20,7 +20,7 @@ pipeline, setup, training and evaluation; `docs/RESULTS.md` has the results.
   `sed "s|/network/rit/lab/kumar_lab|/workspace/lab|" configs/paths.dgx.yaml > configs/paths.local.yaml`.
 - Data: `caoa_data/` on the lab share (`research_data/3D Datasets/caoa_data`): `data/` (S2C-C and Scan2CAD files,
   semantic embeddings, instance predictions), `caoa_cache/`, `release_v1/`, `sphericalmask/` (SphericalMask's own
-  setup, docs/sphericalmask.md). ScanNet and ShapeNetV2 are the lab's copies next to it.
+  setup, docs/instance_predictions.md). ScanNet and ShapeNetV2 are the lab's copies next to it.
 - spconv: one GPU per process (`CUDA_VISIBLE_DEVICES=<g>`).
 - Long runs: queue scripts in `outputs/*.sh`, started with `setsid nohup`, logging start / exit lines to a queue log.
   Wait on log lines, not on `pgrep -f <pattern>` (it matches its own command line).

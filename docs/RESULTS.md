@@ -22,6 +22,8 @@ arXiv 2606.18429). All tables are regenerated from the run outputs by `scripts/r
     Euler-angle error over the symmetric poses. Reported in the paper's Table 1 grouping: avg / class avg.
   - **S2C criteria:** Scan2CAD's criteria on the placed CAD. They compare the CAD's own proportions and origin, so a
     retrieved CAD that is not the exact GT model rarely passes (about 35%). Reported in `results/tables.md`.
+- **Instance predictions:** SoftGroup and SphericalMask, each run from its official code and released ScanNet
+  checkpoint (val AP50 67.3 and 82.4, as published); see [`instance_predictions.md`](instance_predictions.md).
 - **Seeds:** every alignment number is the mean ± std over three OCAM seeds (777–779).
 - **Completions** come from the instance points as they are in the scan (world frame): no part of the GT pose reaches
   the completion network.
@@ -33,7 +35,7 @@ Final OCAM; predicted-instance rows use class-mapped CAD retrieval with re-ranki
 | Paper row | Paper (CAOA metric) | Ours: S2C box | Ours: CAOA | Reference (GT instances): S2C box | Objects |
 |---|---|---|---|---|---|
 | CAPCM+SEM-GT (GT instances, GT CAD) | 86.54 / 78.15 | **84.21 ± 0.31** / 79.84 ± 0.58 | 83.64 ± 0.28 / 75.48 ± 1.05 | — | 1,864 |
-| CAPCM+SEM-SG (SoftGroup) | 76.04 / 66.84 | **84.47 ± 0.17** / 75.72 ± 0.31 | 83.12 ± 0.94 / 74.31 ± 2.05 | 86.49 ± 0.31 | 1,453 |
+| CAPCM+SEM-SG (SoftGroup) | 76.04 / 66.84 | **84.26 ± 0.38** / 75.42 ± 0.64 | 82.91 ± 0.48 / 73.81 ± 1.33 | 86.53 ± 0.28 | 1,453 |
 | CAPCM+SEM-Sph (SphericalMask) | 77.51 / 69.17 | **83.73 ± 0.26** / 78.06 ± 0.50 | 82.65 ± 0.80 / 72.95 ± 2.00 | 85.47 ± 0.28 | 1,762 |
 | CAPCM-Sph (no SEM, no CAD input) | 75.83 / 67.45 | **81.54 ± 0.90** / 75.24 ± 2.03 | 82.69 ± 0.72 / 72.32 ± 0.91 | 83.30 ± 0.31 | 1,762 |
 | No-completion-Sph | 60.92 / 48.63 | **74.16 ± 2.05** / 69.39 ± 3.06 | 73.42 ± 1.11 / 62.57 ± 1.38 | 74.42 ± 1.75 | 1,762 |
@@ -43,15 +45,15 @@ Final OCAM; predicted-instance rows use class-mapped CAD retrieval with re-ranki
   - SEM with the Siamese CAD branch: +2.2 (81.5 → 83.7).
   - On the CAOA metric the last step is a tie (82.69 vs 82.65): its lenient rotation test hides the orientation
     errors the CAD branch fixes.
-- **From GT to predicted instances** costs 1.7–2.0 box points with either instance source (reference vs final).
+- **From GT to predicted instances** costs 1.7–2.3 box points with either instance source (reference vs final).
 - **Our GT row is below the paper's; our predicted-instance rows are above it.**
   - The paper's GT value can't be obtained on the 1,864-object val set: its average isn't k / 1,864 for any k.
   - How the paper selected the objects for its predicted-instance rows isn't described. Ours scores matched objects
     only, as described above.
 
-**SoftGroup vs SphericalMask** on the 1,443 objects both match (S2C box): SoftGroup 84.64 ± 0.35 vs SphericalMask
-**85.75 ± 0.04** (GT-instance reference 86.5 for both). SphericalMask also matches 309 more objects (1,762 vs 1,453).
-Those extra objects are harder, so its score on its own matches is lower (83.73 vs 84.47).
+**SoftGroup vs SphericalMask** on the 1,443 objects both match (S2C box): SoftGroup 84.25 ± 0.32 vs SphericalMask
+**85.68 ± 0.11** (GT-instance reference 86.5 for both). SphericalMask also matches 309 more objects (1,762 vs 1,453).
+Those extra objects are harder, so its score on its own matches is lower (83.73 vs 84.26).
 
 ## OCAM design (paper §3)
 
@@ -109,7 +111,7 @@ in a joint space (InfoNCE), then the OCAM aligns the top 10 and keeps the best f
 - **After re-ranking**, the S2C box score equals the GT CAD's: 84.87 for both. So retrieval costs no alignment
   accuracy, even though the exact model is found for only 6.6% of objects.
 - **On predicted instances**, re-ranked retrieval scores within 0.2 box points of the GT CAD on average over the
-  seeds: SoftGroup 84.47 vs 83.92, SphericalMask 83.73 vs 83.90 (`results/tables.md`).
+  seeds: SoftGroup 84.26 vs 83.96, SphericalMask 83.73 vs 83.90 (`results/tables.md`).
 
 ## Release
 
