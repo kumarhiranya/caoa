@@ -1,127 +1,124 @@
-# CAOA reproduction: results
+# CAOA: results
 
-Clean re-implementation of *CAOA: Completion-Assisted Object-CAD Alignment* (arXiv 2606.18429), checked against the
-legacy research code. This page puts every number in the paper next to ours and explains each difference. Details are in
-the per-phase notes (`docs/results/P*.md`). All tables are regenerated from the run outputs by `scripts/report.py`
-into [`results/tables.md`](results/tables.md).
-
-> **Draft (2026-11-07).** Release numbers filled in. The P10 ablation on the release inputs is running (job 135765, ~1 day).
+The results of this codebase next to every number in the paper (*CAOA: Completion-Assisted Object-CAD Alignment*,
+arXiv 2606.18429). All tables are regenerated from the run outputs by `scripts/report.py` into
+[`results/tables.md`](results/tables.md), which has more detail. The trained models are in the release folder
+(`scripts/make_release.py`).
 
 ## How we evaluate
 
-- **Data:** the Scan2CAD-Completion (S2C-C) annotations only (user, 2026-10-29). The val set is legacy's 1,864 objects
-  (reproduced exactly by the RelPose-cache class rule).
-- **Objects that are not evaluated never count as failures.** On predicted instances, only S2C-C objects matched by a
-  prediction (point IoU ≥ 0.5, one-to-one, confidence ≥ 0.3) are scored. Predictions without an S2C-C object and objects
-  without a prediction are left out; the capture rate says how many objects were matched.
-- **Metrics,** in % of objects:
-  - **legacy:** the legacy CAOA metric (normalised frame, legacy rotation and scale tests). The paper's numbers use it.
-    Table 1 uses its grouping (avg / class avg).
-  - **S2C criteria:** Scan2CAD's per-object criteria (translation ≤ 20 cm, rotation ≤ 20°, scale ≤ 20%, symmetry-aware)
-    on the same objects, unchanged code. They compare the CAD's own proportions and origin, so any retrieved CAD that is
-    not the GT model scores ~35% at best.
-  - **S2C box:** the same criteria on the predicted box instead of the CAD (CAD-independent), so GT-CAD and retrieved-CAD
-    rows can be compared.
-- **Leak-free inputs throughout.** Legacy's completions saw the GT pose (the instance was completed in its GT box frame);
-  every number here uses completions made in the world frame (P8). Leaky numbers are not reported (user, 2026-11-03).
-- **Release models only** for the headline rows (user, 2026-11-05/06): the completion model, SEM, OCAM and retrieval are
-  this project's own trainings; no legacy checkpoint is used.
+- **Data:** the Scan2CAD-Completion (S2C-C) annotations. Val set: 1,864 objects in the 312 ScanNet val scans.
+- **Predicted instances:** an S2C-C object is evaluated when a predicted instance matches it (point IoU ≥ 0.5,
+  one-to-one, confidence ≥ 0.3). Unmatched objects and predictions without an S2C-C object are left out, not counted
+  as failures. The capture rate reports how many objects were matched (SoftGroup 78.0%, SphericalMask 94.5%).
+  Each predicted-instance row is shown with a reference: the same OCAM on the GT instances of the same objects,
+  with the GT CAD.
+- **Metrics** (% of objects passing):
+  - **S2C box (headline):** Scan2CAD's per-object criteria (translation ≤ 20 cm, rotation ≤ 20°, scale ≤ 20%,
+    symmetry-aware; the benchmark's own formulas) applied to the predicted oriented box. Doesn't depend on which CAD
+    was retrieved. Instance mean / class mean over Scan2CAD's categories.
+  - **CAOA:** the metric the paper's alignment numbers use. It is computed in each object's normalised frame, so the
+    translation limit is 20% of the object's size. Its rotation test is lenient for symmetric objects: the smallest
+    Euler-angle error over the symmetric poses. Reported in the paper's Table 1 grouping: avg / class avg.
+  - **S2C criteria:** Scan2CAD's criteria on the placed CAD. They compare the CAD's own proportions and origin, so a
+    retrieved CAD that is not the exact GT model rarely passes (about 35%). Reported in `results/tables.md`.
+- **Seeds:** every alignment number is the mean ± std over three OCAM seeds (777–779).
+- **Completions** come from the instance points as they are in the scan (world frame): no part of the GT pose reaches
+  the completion network.
+
+## Alignment (paper Table 1)
+
+Final OCAM; predicted-instance rows use class-mapped CAD retrieval with re-ranking.
+
+| Paper row | Paper (CAOA metric) | Ours: S2C box | Ours: CAOA | Reference (GT instances): S2C box | Objects |
+|---|---|---|---|---|---|
+| CAPCM+SEM-GT (GT instances, GT CAD) | 86.54 / 78.15 | **84.21 ± 0.31** / 79.84 ± 0.58 | 83.64 ± 0.28 / 75.48 ± 1.05 | — | 1,864 |
+| CAPCM+SEM-SG (SoftGroup) | 76.04 / 66.84 | **84.47 ± 0.17** / 75.72 ± 0.31 | 83.12 ± 0.94 / 74.31 ± 2.05 | 86.49 ± 0.31 | 1,453 |
+| CAPCM+SEM-Sph (SphericalMask) | 77.51 / 69.17 | **83.73 ± 0.26** / 78.06 ± 0.50 | 82.65 ± 0.80 / 72.95 ± 2.00 | 85.47 ± 0.28 | 1,762 |
+| CAPCM-Sph (no SEM, no CAD input) | 75.83 / 67.45 | **81.54 ± 0.90** / 75.24 ± 2.03 | 82.69 ± 0.72 / 72.32 ± 0.91 | 83.30 ± 0.31 | 1,762 |
+| No-completion-Sph | 60.92 / 48.63 | **74.16 ± 2.05** / 69.39 ± 3.06 | 73.42 ± 1.11 / 62.57 ± 1.38 | 74.42 ± 1.75 | 1,762 |
+
+- **Every component helps, as in the paper.**
+  - Completion: +7.4 box (74.2 → 81.5).
+  - SEM with the Siamese CAD branch: +2.2 (81.5 → 83.7).
+  - On the CAOA metric the last step is a tie (82.69 vs 82.65): its lenient rotation test hides the orientation
+    errors the CAD branch fixes.
+- **From GT to predicted instances** costs 1.7–2.0 box points with either instance source (reference vs final).
+- **Our GT row is below the paper's; our predicted-instance rows are above it.**
+  - The paper's GT value can't be obtained on the 1,864-object val set: its average isn't k / 1,864 for any k.
+  - How the paper selected the objects for its predicted-instance rows isn't described. Ours scores matched objects
+    only, as described above.
+
+**SoftGroup vs SphericalMask** on the 1,443 objects both match (S2C box): SoftGroup 84.64 ± 0.35 vs SphericalMask
+**85.75 ± 0.04** (GT-instance reference 86.5 for both). SphericalMask also matches 309 more objects (1,762 vs 1,453).
+Those extra objects are harder, so its score on its own matches is lower (83.73 vs 84.47).
+
+## OCAM design (paper §3)
+
+GT instances, GT CAD, 1,864 objects, 3 seeds. The paper describes a Siamese network (one trunk shared by object and
+CAD) with SEM, trained with a Chamfer term in the loss and its own schedule. Each step is tested separately:
+
+| OCAM | S2C box | CAOA |
+|---|---|---|
+| Completion only, no SEM | 82.56 ± 0.35 / 77.20 ± 1.30 | 83.42 ± 0.14 |
+| + SEM | 83.57 ± 0.66 / 78.92 ± 0.34 | **84.48 ± 0.65** |
+| + SEM + Siamese CAD branch, shared trunk (the paper's design) | 75.91 ± 1.07 / 69.67 ± 0.93 | 78.17 ± 1.61 |
+| **+ SEM + Siamese CAD branch, separate trunks (final)** | 84.21 ± 0.31 / 79.84 ± 0.58 | 83.64 ± 0.28 |
+| final + the paper's loss (t2 / r3 / s2 + 5 × Chamfer) | **84.57 ± 0.45** / 80.30 ± 0.99 | 83.32 ± 0.11 |
+| final + the paper's loss and schedule (wd 1e-4, 150 epochs) | 82.65 ± 1.24 / 78.21 ± 1.24 | 81.65 ± 0.21 |
+| No completion (instance points only) | 73.30 ± 1.50 / 69.03 ± 1.96 | 72.57 ± 1.19 |
+
+- **Separate trunks:** a CAD branch with its own trunk helps (+1.7 box over the baseline, +0.6 over SEM alone).
+  Sharing one trunk between object and CAD loses 8.3 points.
+- **SEM:** alone, it adds +1.0 box and +1.1 CAOA.
+- **The paper's loss** is level with the final model (within one std). **The paper's schedule** on top of it is
+  worse (−1.9).
+- We keep separate trunks + SEM with the default loss and schedule: the lowest spread and the simpler loss.
 
 ## Completion (paper Table 2)
 
-F-Score / CDL1 / CDL2 (×1000) on the S2C-C val split; legacy `test()` aggregation on the best checkpoint.
+F-Score / CDL1 / CDL2 (× 1000) on the S2C-C val split.
 
 | Training data | Paper | Ours |
 |---|---|---|
 | S2C-C | 0.0602 / 46.80 / 25.69 | 0.0594 / **45.00** / **23.06** |
-| SN-Indoor + S2C-C (concat; the model used downstream) | 0.0624 / 45.37 / 23.74 | 0.0623 / **44.42** / **23.20** |
-| S2C-C + context 100 cm (best validation, as the paper) | 0.2152 / 22.47 / 2.30 | 0.2161 / 22.45 / 2.31 |
+| SN-Indoor + S2C-C (concat; the pipeline's model) | 0.0624 / 45.37 / 23.74 | 0.0623 / **44.42** / **23.20** |
+| S2C-C + 100 cm context (best validation, as the paper) | 0.2152 / 22.47 / 2.30 | **0.2196 / 22.18 / 2.25** |
 
-Reproduced: the same or slightly better (single runs). Not retrained (re-scored legacy checkpoints within 0.07% in P6):
-the PCN / ShapeNet-55 / ShapeNet-34 rows. The paper's SN-Indoor-only rows (51.19, 34.99) are in no legacy log.
+Single runs. Ours matches or beats the paper on CDL1 and CDL2. The paper's other Table 2 rows (PCN, ShapeNet-55 / 34,
+SN-Indoor only) were not trained here.
 
-## Symmetry embedding (SEM)
+## Symmetry embedding module (SEM)
 
 | | Accuracy | Macro-F1 |
 |---|---|---|
 | Paper | 95.8 | 94.1 |
-| Ours: retrained, BatchNorm recalibrated (the release SEM), val | 98.3 | 97.6 |
-| Ours: unseen CADs only (425) | 91.1 | 86.3 |
+| Ours (val CADs) | **98.5** | **97.8** |
 
-The paper's numbers are legacy's training-log values (no evaluation code computes them, P9). Our higher overall number
-is memorisation of CADs seen in training; on unseen CADs ours and the legacy checkpoint are equal. Retraining needed one
-fix (switch `--bn-recalibration train`): without it the model collapses in eval mode (66%).
-
-## Alignment (paper Table 1)
-
-Legacy metric, Table 1 grouping, avg / class avg. Ours: release models, class-mapped CAD retrieval with re-ranking, on
-the matched objects; the GT-instance reference is on the same objects.
-
-| Paper row | Paper | Ours | GT-instance reference (same OCAM, same objects) | Objects evaluated |
-|---|---|---|---|---|
-| CAPCM+SEM-GT (GT instances + GT CAD, all objects; 3 seeds) | 86.54 / 78.15 | 83.64 ± 0.28 / 75.48 ± 1.05 | — | 1,864 |
-| CAPCM+SEM-SG (SoftGroup) | 76.04 / 66.84 | 82.04 / 71.97 | 85.82 / 75.01 | 1,453 (78.0% captured) |
-| CAPCM+SEM-Sph (SphericalMask) | 77.51 / 69.17 | 82.01 / 70.86 | 83.94 / 73.47 | 1,762 (94.5% captured) |
-| CAPCM-Sph (no SEM, single-trunk OCAM) | 75.83 / 67.45 | 82.86 / 72.13 | 84.28 / 73.79 | 1,762 |
-| No-completion-Sph (single trunk, instance only) | 60.92 / 48.63 | 73.55 / 62.40 | 74.35 / 63.91 | 1,762 |
-
-Predicted-instance rows: seed 777; the instance source's matched objects; class-mapped retrieval, re-ranked by the OCAM.
-The release OCAM on GT instances equals the current one (83.64 ± 0.28 vs 83.53 ± 0.34 over 3 seeds), so our own CAPCM
-and SEM replace legacy's at no cost.
-
-SoftGroup vs SphericalMask on the 1,443 objects both match (head-to-head): 83.51 / 74.78 vs **84.48** / 74.45 (GT-instance
-reference 85.93 / 86.00). SphericalMask finds many more objects (1,762 vs 1,453) at about the same per-object accuracy
-(82.01 vs 82.04 on each source's own matches).
-
-- **Completion matters, as in the paper:** without it −9.3 points (73.55 vs 82.86), the paper −14.9.
-- **SEM + the Siamese CAD branch don't help in the full pipeline on the legacy metric:** CAPCM-Sph 82.86 vs CAPCM+SEM-Sph
-  82.01 (the paper: +1.7 for SEM). The Siamese OCAM sees the retrieved CAD, which is rarely the GT model (exact hit 5–7%);
-  with the GT CAD it scores 82.86 too. The single-trunk OCAM ignores the CAD, so retrieval can't hurt it. On the S2C box
-  criteria the order flips (83.48 vs 80.99): the Siamese model gets the box more often right within Scan2CAD's
-  tolerances. The ablation re-run (below) checks this over 3 seeds.
-
-Why our GT row is lower than the paper's:
-- **The GT-pose leak.** With legacy's leaky completions the same model scored ~4 points higher (P8); 86.54 used them.
-- **The paper's GT row is not attainable on the 1,864 set** (its avg is not k/1,864 for any k, and no grouping of the
-  set gives its columns), so it was computed on another sample set or edited (PLAN.md, paper vs codebase).
-- The paper's predicted-instance rows are *below* ours. How legacy chose the evaluated objects for them is unknown
-  (its SoftGroup evaluation code is lost); ours scores matched objects only, as decided above.
-
-## OCAM design (paper §3; our P10 ablation, 3 seeds)
-
-GT instances, GT CAD, 1,864 objects; mean ± std over seeds 777–779. Legacy / S2C box (instance mean).
-
-| OCAM | Legacy | S2C box |
-|---|---|---|
-| Completion only, no SEM | 83.15 ± 0.28 | 82.65 ± 0.73 |
-| + SEM | 84.23 ± 0.62 | 83.35 ± 0.73 |
-| + Siamese CAD branch, shared trunk (the paper's design) | 80.35 ± 0.62 | 79.60 ± 1.74 |
-| **+ Siamese CAD branch, separate trunks (ours, final)** | 83.53 ± 0.34 | 84.50 ± 0.54 |
-| + the paper's loss (t2/r3/s2, 5 × CAD–object Chamfer) | 83.14 ± 0.63 | 84.80 ± 0.14 |
-| + the paper's schedule (wd 1e-4, 150 epochs) | 81.46 ± 0.28 | 82.85 ± 0.14 |
-
-- The paper's shared-weight Siamese trunk is clearly worse (−3.2 vs separate trunks, ~5 std); so is its schedule (−2.1).
-- SEM, separate trunks and the paper's loss are within ~1 point of each other. We keep separate trunks + SEM with
-  legacy's loss and schedule: best on the Scan2CAD and box criteria, lowest spread.
-- The legacy code had no SEM-using or Siamese alignment checkpoint; these are new trainings of the paper's description.
+Training needs one addition: BatchNorm statistics recomputed in eval mode after training
+(`caoa.models.sem.recalibrate_batchnorm`). Without it the model collapses in eval mode (66.5%), because the stored
+statistics were collected with drop-path on. Many val CADs also occur in training, so on CADs never seen in
+training the accuracy is lower.
 
 ## CAD retrieval (not in the paper's tables)
 
-The legacy CAD-matching module is lost; the paper describes PointNet-descriptor retrieval. Ours (framework completion,
-not a contribution; user, 2026-10-29): an InfoNCE embedding of the completion + instance against all 52,472 ShapeNetV2
-models, then the OCAM aligns the top 10 and the best fit is kept. On GT instances: exact model in the top 10 for 35.7%,
-CD-L1 of the top-1 to the GT CAD 53.5 (random 91.1); after re-ranking with the release OCAM, legacy 83.26 vs 83.10 with the GT CAD,
-S2C box 84.87 for both (stage 1 alone: 80.36 / 84.28).
-
-## Not reproduced / out of scope
-
-- Legacy's own SoftGroup run and evaluation (E8): the cached SoftGroup val predictions are used instead (user,
-  2026-11-04); SphericalMask is run from its official checkpoint (val AP 62.55 / AP50 82.36 vs the published 62.6 / 81.9).
-- Inference timing (E10, the paper's 0.58 s per scene for SEM): measured per CAD (4.9 ms), not per scene.
-- CIS2VR-era evaluations (scope rule).
+The paper does not specify its retrieval module. Ours embeds the completed object and every ShapeNetV2 CAD (52,472)
+in a joint space (InfoNCE), then the OCAM aligns the top 10 and keeps the best fit.
+- **Stage 1** (GT instances, same synset): exact model in the top 10 for 35.7%, top-1 Chamfer distance to the GT CAD
+  53.5 (a random CAD of the synset: 91.1).
+- **After re-ranking**, the S2C box score equals the GT CAD's: 84.87 for both. So retrieval costs no alignment
+  accuracy, even though the exact model is found for only 6.6% of objects.
+- **On predicted instances**, re-ranked retrieval scores within 0.2 box points of the GT CAD on average over the
+  seeds: SoftGroup 84.47 vs 83.92, SphericalMask 83.73 vs 83.90 (`results/tables.md`).
 
 ## Release
 
-`caoa_data/release_v1/` on the lab share (built 2026-11-07, 17 files, 814 MiB): the CAPCM, SEM, OCAM (3 seeds) and
-retrieval checkpoints with their configs, results and a SHA-256 manifest, plus the ShapeNetV2 database embeddings. `scripts/align_scene.py` runs it on a
-scan with instance predictions; see the README.
+`release_v1` (`scripts/make_release.py`; 144 files, 3.4 GB) contains:
+- the three CAPCMs;
+- the SEM;
+- every OCAM of the tables above, for all three seeds;
+- the retrieval model with its ShapeNetV2 database embeddings;
+- the evaluation outputs;
+- a SHA-256 manifest.
+
+`scripts/align_scene.py` and `notebooks/single_scene_pipeline.ipynb` run it on a scan (see the README).
