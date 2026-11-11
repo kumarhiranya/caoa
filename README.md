@@ -185,10 +185,12 @@ uv run python scripts/report.py                                                 
 
 ```bibtex
 @inproceedings{kumar2026caoa,
-  title     = {{CAOA} -- Completion-Assisted Object-{CAD} Alignment},
-  author    = {Garbha Kumar, Hiranya and Kamal, Minhas and Prabhakaran, Balakrishnan},
-  booktitle = {International Conference on 3D Vision (3DV)},
-  year      = {2026},
+  title={CAOA-Completion-Assisted Object-CAD Alignment},
+  author={Kumar, Hiranya Garbha and Kamal, Minhas and Prabhakaran, Balakrishnan},
+  booktitle={2026 International Conference on 3D Vision (3DV)},
+  pages={427--436},
+  year={2026},
+  organization={IEEE}
   doi       = {10.1109/3DV69130.2026.00047}
 }
 ```
