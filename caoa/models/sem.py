@@ -1,4 +1,4 @@
-"""SEM: the symmetry embedding module, a PTv3 classifier of CAD symmetry.
+"""SEM: the Symmetry Encoder Module, a PTv3 classifier of CAD symmetry.
 
 * Backbone: the vendored PTv3 (`caoa.models.ptv3`) with the `cls-ptv3-v1m1-0-shapenet_v2_mini` configuration, except
   `enable_flash`: flash-attn is not used; the non-flash path pads the same patches, so only the attention precision

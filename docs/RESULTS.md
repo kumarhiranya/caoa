@@ -1,9 +1,9 @@
 # CAOA: results
 
-The results of this codebase next to every number in the paper (*CAOA: Completion-Assisted Object-CAD Alignment*,
-arXiv 2606.18429). All tables are regenerated from the run outputs by `scripts/report.py` into
-[`results/tables.md`](results/tables.md), which has more detail. The trained models are in the release folder
-(`scripts/make_release.py`).
+The results of this implementation next to every number in the paper (*CAOA – Completion-Assisted Object-CAD
+Alignment*, 3DV 2026, [arXiv 2606.18429](https://arxiv.org/abs/2606.18429)). All tables are regenerated from the run
+outputs by `scripts/report.py` into [`results/tables.md`](results/tables.md), which has more detail. The trained models
+are on Zenodo ([doi:10.5281/zenodo.24121532](https://doi.org/10.5281/zenodo.24121532)).
 
 ## How we evaluate
 
@@ -90,7 +90,7 @@ F-Score / CDL1 / CDL2 (× 1000) on the S2C-C val split.
 Single runs. Ours matches or beats the paper on CDL1 and CDL2. The paper's other Table 2 rows (PCN, ShapeNet-55 / 34,
 SN-Indoor only) were not trained here.
 
-## Symmetry embedding module (SEM)
+## Symmetry Encoder Module (SEM)
 
 | | Accuracy | Macro-F1 |
 |---|---|---|
@@ -104,8 +104,9 @@ training the accuracy is lower.
 
 ## CAD retrieval (not in the paper's tables)
 
-The paper does not specify its retrieval module. Ours embeds the completed object and every ShapeNetV2 CAD (52,472)
-in a joint space (InfoNCE), then the OCAM aligns the top 10 and keeps the best fit.
+The paper retrieves candidates with PointNet++ features. This implementation learns its own embedding instead: the
+completed object and every ShapeNetV2 CAD (52,472) are embedded in a joint space (InfoNCE), then the OCAM aligns the
+top 10 and keeps the best fit.
 - **Stage 1** (GT instances, same synset): exact model in the top 10 for 35.7%, top-1 Chamfer distance to the GT CAD
   53.5 (a random CAD of the synset: 91.1).
 - **After re-ranking**, the S2C box score equals the GT CAD's: 84.87 for both. So retrieval costs no alignment

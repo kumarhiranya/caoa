@@ -104,7 +104,7 @@ def sem_section():
             if key in d:
                 r = d[key]
                 rows.append([f"{label}, {what}", f"{r['accuracy_all'] * 100:.1f}", f"{r['macro_f1_all'] * 100:.1f}", r["n_all"]])
-    return ("## Symmetry embedding module (SEM)\n\nSymmetric / not symmetric on the val pairs' CADs (whole val set).\n\n"
+    return ("## Symmetry Encoder Module (SEM)\n\nSymmetric / not symmetric on the val pairs' CADs (whole val set).\n\n"
             + table(["SEM", "Accuracy", "Macro-F1", "Samples"], rows))
 
 

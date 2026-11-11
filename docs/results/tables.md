@@ -49,7 +49,7 @@ F-Score / CDL1 / CDL2 (x 1000) on the S2C-C val split (1,744 samples). Test = th
 | SN-Indoor + S2C-C (concat) | 0.0623 / 44.42 / 23.20 | 0.0583 / 41.46 / 15.03 (epoch 110) | 0.0624 / 45.37 / 23.74 |
 | S2C-C + context 100 cm | 0.2784 / 20.51 / 2.43 | 0.2196 / 22.18 / 2.25 (epoch 150) | 0.2152 / 22.47 / 2.30 |
 
-## Symmetry embedding module (SEM)
+## Symmetry Encoder Module (SEM)
 
 Symmetric / not symmetric on the val pairs' CADs (whole val set).
 

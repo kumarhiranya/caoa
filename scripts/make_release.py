@@ -5,7 +5,7 @@
 Layout (`release.md` in the folder repeats it):
 * `capcm/<s2cc | concat | s2cc_context100>/`: the completion models of Table 2 (`ckpt-best.pth`, `config.yaml`,
   `test_results.json`, `train_log.json`); `concat` is the pipeline's;
-* `sem/`: the symmetry embedding module (`model.pth`, BatchNorm-recalibrated) and its validation results;
+* `sem/`: the Symmetry Encoder Module (`model.pth`, BatchNorm-recalibrated) and its validation results;
 * `ocam/<variant>/seed<777 | 778 | 779>/`: every alignment model (`model_final.pth`, `config.yaml`, `results.json`,
   `train_log.json`); `final` is the pipeline's, the others are the ablation and the paper Table 1 baselines;
 * `retrieval/`: the CAD retrieval embedding and its ShapeNetV2 database embeddings (`db_embeddings.npz`: keys, catids,
@@ -49,7 +49,7 @@ Trained models of the CAOA codebase, with their configs and results (`manifest.j
 | Folder | Contents |
 |---|---|
 | `capcm/<s2cc, concat, s2cc_context100>/` | completion models (paper Table 2); `concat` is the pipeline's |
-| `sem/` | symmetry embedding module (BatchNorm-recalibrated) |
+| `sem/` | Symmetry Encoder Module (BatchNorm-recalibrated) |
 | `ocam/final/seed<777, 778, 779>/` | the alignment model of the pipeline (Siamese, separate trunks, + SEM) |
 | `ocam/<baseline, sem, siamese_shared, paper_loss, paper_schedule>/seed*/` | the OCAM design ablation |
 | `ocam/no_completion/seed*/` | the paper Table 1 "No-completion" model (`baseline` is "CAPCM", no SEM) |
