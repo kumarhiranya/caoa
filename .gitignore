@@ -9,3 +9,8 @@ packages.json
 *.tar.zst
 release_v1/
 data/
+
+# Claude Code (local only)
+CLAUDE.md
+CLAUDE.local.md
+.claude/
